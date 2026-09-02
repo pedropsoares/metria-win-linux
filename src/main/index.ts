@@ -73,16 +73,17 @@ function widgetBounds(area: Electron.Rectangle, providerCount: number): Electron
   return { x, y, width, height };
 }
 function createWidgetWindow(): BrowserWindow {
+  const initial = widgetBounds(displayArea(), 0);
   const widget = new BrowserWindow({
-    width: WIDGET_WIDTH, height: 120, frame: false, resizable: false, movable: false,
+    x: initial.x, y: initial.y, width: initial.width, height: initial.height, frame: false, resizable: false, movable: false,
     backgroundColor: "#0d1117", skipTaskbar: true, alwaysOnTop: true, hasShadow: false, type: "toolbar", title: "Metria usage widget",
     webPreferences: { preload: join(__dirname, "../preload/index.js"), contextIsolation: true, sandbox: true, nodeIntegration: false }
   });
   widget.loadFile(join(__dirname, "../renderer/widget.html"));
   // Same re-assert on mapping as the card: compositors may override pre-show bounds.
-  widget.on("show", () => { widget.setAlwaysOnTop(true); updateWidgetBounds(lastUsage); });
+  widget.on("show", () => { widget.setAlwaysOnTop(true, "floating"); updateWidgetBounds(lastUsage); });
   widget.on("closed", () => { widgetWindow = undefined; hideCard(); });
-  widget.setAlwaysOnTop(true);
+  widget.setAlwaysOnTop(true, "floating");
   return widget;
 }
 function updateWidgetBounds(values: typeof lastUsage): void {
@@ -350,6 +351,7 @@ async function usage() {
   lastUsage = values;
   const fresh = values.filter((value) => value.windows.length && !value.error);
   if (fresh.length) saveCachedUsage(values);
+  for (const target of [window, widgetWindow, cardWindow]) target?.webContents.send("metria:usage-updated");
   updateTray(values); if (supportsWidget()) { updateWidgetBounds(values); refreshCard(); } else updateBadges(values); return values;
 }
 function cachePath(): string { return join(app.getPath("userData"), "usage-cache.json"); }

@@ -52,6 +52,7 @@ function Widget(): JSX.Element {
   // picks up the new provider immediately instead of waiting for the poll cycle.
   useEffect(() => {
     window.metria.onSettingsChanged(() => { void queryClient.invalidateQueries(); });
+    window.metria.onUsageChanged(() => { void queryClient.invalidateQueries({ queryKey: ["usage"] }); });
   }, []);
   const settings = useQuery({ queryKey: ["settings"], queryFn: () => window.metria.getSettings() });
   const [hovered, setHovered] = useState(false);

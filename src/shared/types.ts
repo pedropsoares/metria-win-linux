@@ -61,6 +61,7 @@ export interface MetriaApi {
   setProviderHover(index: number | null): Promise<void>;
   resizeCard(height: number): Promise<void>;
   onSettingsChanged(callback: () => void): void;
+  onUsageChanged(callback: () => void): void;
   onCardShow(callback: (payload: CardShowPayload) => void): void;
   onCardHide(callback: () => void): void;
   setProviderEnabled(kind: ProviderKind, enabled: boolean): Promise<AppSettings>;

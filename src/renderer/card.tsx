@@ -54,7 +54,10 @@ function Card(): JSX.Element {
     refetchOnWindowFocus: false
   });
   const settings = useQuery({ queryKey: ["settings"], queryFn: () => window.metria.getSettings() });
-  useEffect(() => { window.metria.onSettingsChanged(() => { void queryClient.invalidateQueries({ queryKey: ["settings"] }); }); }, []);
+  useEffect(() => {
+    window.metria.onSettingsChanged(() => { void queryClient.invalidateQueries({ queryKey: ["settings"] }); });
+    window.metria.onUsageChanged(() => { void queryClient.invalidateQueries({ queryKey: ["usage"] }); });
+  }, []);
   const provider = usage.data?.find((candidate) => candidate.kind === payload?.kind);
   const visibleWindows = provider?.windows.filter((row) => !settings.data?.hiddenUsageWindowTitles[provider.kind]?.includes(row.title)) ?? [];
 

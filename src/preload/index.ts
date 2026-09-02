@@ -8,6 +8,7 @@ const api: MetriaApi = {
   setProviderHover: (index: number | null) => ipcRenderer.invoke("metria:provider-hover", index),
   resizeCard: (height: number) => ipcRenderer.invoke("metria:card-resize", height),
   onSettingsChanged: (callback: () => void) => { ipcRenderer.on("metria:settings-changed", () => callback()); },
+  onUsageChanged: (callback: () => void) => { ipcRenderer.on("metria:usage-updated", () => callback()); },
   onCardShow: (callback: (payload: CardShowPayload) => void) => { ipcRenderer.on("metria:card-show", (_event, payload: CardShowPayload) => callback(payload)); },
   onCardHide: (callback: () => void) => { ipcRenderer.on("metria:card-hide", () => callback()); },
   getSettings: () => ipcRenderer.invoke("metria:get-settings"),
