@@ -4,7 +4,7 @@
   "private": false,
   "description": "Cross-platform Electron implementation of Metria",
   "author": "Metria <metria@users.noreply.github.com>",
-  "homepage": "https://github.com/yurirxmos/metria-win-linux",
+  "homepage": "https://github.com/pedropsoares/metria-win-linux",
   "desktopName": "Metria Electron",
   "main": "dist/main/index.js",
   "scripts": {

@@ -25,4 +25,4 @@ linux:
   artifactName: Metria-Electron-${version}-${arch}.${ext}
 publish:
   provider: generic
-  url: https://github.com/yurirxmos/metria-win-linux/releases/download/electron-latest/
+  url: https://github.com/pedropsoares/metria-win-linux/releases/download/electron-latest/

@@ -7,10 +7,10 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/yurirxmos/metria-win-linux/stargazers"><img src="https://img.shields.io/github/stars/yurirxmos/metria-win-linux?style=flat-square" alt="Stars" /></a>
-  <a href="https://github.com/yurirxmos/metria-win-linux/releases"><img src="https://img.shields.io/github/v/tag/yurirxmos/metria-win-linux?label=version&style=flat-square" alt="Version" /></a>
+  <a href="https://github.com/pedropsoares/metria-win-linux/stargazers"><img src="https://img.shields.io/github/stars/pedropsoares/metria-win-linux?style=flat-square" alt="Stars" /></a>
+  <a href="https://github.com/pedropsoares/metria-win-linux/releases"><img src="https://img.shields.io/github/v/tag/pedropsoares/metria-win-linux?label=version&style=flat-square" alt="Version" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg?style=flat-square" alt="License" /></a>
-  <a href="https://github.com/yurirxmos/metria-win-linux/commits"><img src="https://img.shields.io/github/commit-activity/m/yurirxmos/metria-win-linux?style=flat-square" alt="Commits" /></a>
+  <a href="https://github.com/pedropsoares/metria-win-linux/commits"><img src="https://img.shields.io/github/commit-activity/m/pedropsoares/metria-win-linux?style=flat-square" alt="Commits" /></a>
 </p>
 
 ## Contents
@@ -39,7 +39,7 @@ The app stores its settings in its own `com.metria.electron` application-data na
 
 ## Download
 
-Download the installer for your operating system from the [GitHub Releases](https://github.com/yurirxmos/metria-win-linux/releases) page.
+Download the installer for your operating system from the [GitHub Releases](https://github.com/pedropsoares/metria-win-linux/releases) page.
 
 - **Windows**: `.exe` installer.
 - **Linux**: `.AppImage` package.
@@ -94,7 +94,7 @@ be paired with either app:
 
 ## Quick start
 
-Download the latest installer from [GitHub Releases](https://github.com/yurirxmos/metria-win-linux/releases), or build it on Windows or Linux:
+Download the latest installer from [GitHub Releases](https://github.com/pedropsoares/metria-win-linux/releases), or build it on Windows or Linux:
 
 ```sh
 npm ci
