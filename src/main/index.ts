@@ -76,7 +76,7 @@ function createWidgetWindow(): BrowserWindow {
   const initial = widgetBounds(displayArea(), 0);
   const widget = new BrowserWindow({
     x: initial.x, y: initial.y, width: initial.width, height: initial.height, frame: false, resizable: false, movable: false,
-    backgroundColor: "#0d1117", skipTaskbar: true, alwaysOnTop: true, hasShadow: false, type: "toolbar", title: "Metria usage widget",
+    backgroundColor: "#00000000", transparent: true, skipTaskbar: true, alwaysOnTop: true, hasShadow: false, type: "toolbar", title: "Metria usage widget",
     webPreferences: { preload: join(__dirname, "../preload/index.js"), contextIsolation: true, sandbox: true, nodeIntegration: false }
   });
   widget.loadFile(join(__dirname, "../renderer/widget.html"));
