@@ -25,7 +25,7 @@ const providers = new ProviderService(() => settings.load());
 
 function createWindow(): BrowserWindow {
   const next = new BrowserWindow({
-    width: 760, height: 680, minWidth: 480, minHeight: 560, show: false,
+    width: 760, height: 680, minWidth: 480, minHeight: 560, show: false, skipTaskbar: true,
     title: "Metria Electron",
     icon: findAsset("metria-mascot.png"),
     backgroundColor: "#0d1117",
