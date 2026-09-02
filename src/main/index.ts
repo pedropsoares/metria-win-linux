@@ -19,6 +19,7 @@ let lastUsage: Awaited<ReturnType<ProviderService["fetch"]>> = [];
 let badgeTrays = new Map<ProviderKind, Tray>();
 let updateState: "idle" | "downloaded" = "idle";
 let updateTimer: NodeJS.Timeout | undefined;
+let pendingOpenSettings = false;
 const settings = new SettingsStore();
 const providers = new ProviderService(() => settings.load());
 
@@ -32,6 +33,11 @@ function createWindow(): BrowserWindow {
   });
   next.removeMenu();
   next.loadFile(join(__dirname, "../renderer/index.html"));
+  next.webContents.once("did-finish-load", () => {
+    if (!pendingOpenSettings) return;
+    pendingOpenSettings = false;
+    setTimeout(() => next.webContents.send("metria:open-settings"), 0);
+  });
   if (process.env.METRIA_SMOKE === "1") next.webContents.once("did-finish-load", () => {
     void next.webContents.executeJavaScript("typeof window.metria === 'object' && typeof window.metria.getUsage === 'function'")
       .then((ready) => console.log(`METRIA_SMOKE_PRELOAD=${ready}`));
@@ -43,6 +49,14 @@ function createWindow(): BrowserWindow {
 }
 
 function showDashboard(): void { if (!window) window = createWindow(); window.show(); window.focus(); }
+function showDashboardSettings(): void {
+  pendingOpenSettings = true;
+  showDashboard();
+  if (window && !window.webContents.isLoading()) {
+    pendingOpenSettings = false;
+    window.webContents.send("metria:open-settings");
+  }
+}
 
 /** Opaque compact widget that stays visible on Windows and Linux. Linux needs
  * it because the system tray is unavailable to some GUI environments; Windows
@@ -285,7 +299,7 @@ function showWidgetMenu(): void {
     { label: "Open dashboard", click: showDashboard },
     { label: "Refresh", click: () => { void usage(); } },
     { type: "separator" },
-    { label: "Settings", click: () => { showDashboard(); window?.webContents.send("metria:open-settings"); } },
+    { label: "Settings", click: showDashboardSettings },
     { type: "separator" },
     { label: "Quit Metria", click: () => { isQuitting = true; app.quit(); } }
   ]).popup({ window: widgetWindow });
