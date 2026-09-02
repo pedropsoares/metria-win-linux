@@ -1,11 +1,15 @@
-import { app, BrowserWindow, ipcMain, Menu, nativeImage, screen, shell, Tray } from "electron";
+import { app, BrowserWindow, clipboard, ipcMain, Menu, nativeImage, screen, shell, Tray } from "electron";
 import { autoUpdater } from "electron-updater";
 import { dirname, join } from "node:path";
 import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { ALL_PROVIDER_KINDS, CARD_WIDTH, isProviderKind, PROVIDER_LOGOS, providerShortLabel, WIDGET_ITEM_HEIGHT } from "../shared/types";
+import { LocalPWAServer } from "./local-pwa-server";
+import { NtfyPublisher } from "./ntfy";
+import { PairingStore } from "./pairing";
 import { ProviderService } from "./providers";
+import { findResource } from "./resources";
 import { SettingsStore } from "./settings";
-import type { AppSettings, ProviderKind, ProviderSourceChoice, ProviderUsage } from "../shared/types";
+import type { AppSettings, PairingInfo, ProviderKind, ProviderSourceChoice, ProviderUsage } from "../shared/types";
 
 let window: BrowserWindow | undefined;
 let widgetWindow: BrowserWindow | undefined;
@@ -22,12 +26,17 @@ let updateTimer: NodeJS.Timeout | undefined;
 let pendingOpenSettings = false;
 const settings = new SettingsStore();
 const providers = new ProviderService(() => settings.load());
+const localPWAServer = new LocalPWAServer(findResource);
+const ntfyPublisher = new NtfyPublisher();
+// Created once the app is ready, because the secret's at-rest encryption needs
+// `safeStorage`, which is only available then.
+let pairing: PairingStore | undefined;
 
 function createWindow(): BrowserWindow {
   const next = new BrowserWindow({
     width: 760, height: 680, minWidth: 480, minHeight: 560, show: false, skipTaskbar: true,
     title: "Metria Electron",
-    icon: findAsset("metria-mascot.png"),
+    icon: findResource("metria-mascot.png"),
     backgroundColor: "#0d1117",
     webPreferences: { preload: join(__dirname, "../preload/index.js"), contextIsolation: true, sandbox: true, nodeIntegration: false, webSecurity: true }
   });
@@ -210,15 +219,9 @@ function formatReset(resetDate: string | null): string {
   if (seconds > 0 && seconds < 86400) { const totalMinutes = Math.floor(seconds / 60); const hours = Math.floor(totalMinutes / 60); const minutes = totalMinutes % 60; return hours > 0 ? (minutes > 0 ? `${hours} hr ${minutes} min` : `${hours} hr`) : `${minutes} min`; }
   return new Date(resetDate).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
 }
-function findAsset(name: string): string | undefined {
-  const candidates = app.isPackaged
-    ? [join(process.resourcesPath, "MetriaPWA", name)]
-    : [join(app.getAppPath(), "resources", "assets", name)];
-  return candidates.find((candidate) => existsSync(candidate));
-}
 const FALLBACK_ICON = "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxOCIgaGVpZ2h0PSIxOCIgdmlld0JveD0iMCAwIDE4IDE4Ij48cmVjdCB3aWR0aD0iMTgiIGhlaWdodD0iMTgiIHJ4PSI0IiBmaWxsPSIjMDAwIi8+PHBhdGggZD0iTTMgMTNoMlY5SDN6bTQgMGgyVjVIOXptNCAwaDJWN0gxMXptNCAwaDJWM0gxNXoiIGZpbGw9IiNmNGY2ZjgiLz48L3N2Zz4=";
 function trayMenuIcon(name: string): Electron.NativeImage | undefined {
-  const path = findAsset(name);
+  const path = findResource(name);
   return path ? nativeImage.createFromPath(path).resize({ width: 16, height: 16 }) : undefined;
 }
 function usageRows(providers: typeof lastUsage): UsageRow[] {
@@ -314,7 +317,7 @@ function quitApp(): void {
 }
 
 function createTray(): void {
-  const assetIcon = findAsset("metria-mascot.png");
+  const assetIcon = findResource("metria-mascot.png");
   const icon = assetIcon
     ? nativeImage.createFromPath(assetIcon).resize({ width: 16, height: 16 })
     : nativeImage.createFromDataURL(FALLBACK_ICON);
@@ -386,7 +389,7 @@ async function usage() {
   const fresh = values.filter((value) => value.windows.length && !value.error);
   if (fresh.length) saveCachedUsage(values);
   for (const target of [window, widgetWindow, cardWindow]) target?.webContents.send("metria:usage-updated");
-  updateTray(values); if (supportsWidget()) { updateWidgetBounds(values); refreshCard(); } else updateBadges(values); return values;
+  updateTray(values); publishSnapshot(values); if (supportsWidget()) { updateWidgetBounds(values); refreshCard(); } else updateBadges(values); return values;
 }
 function cachePath(): string { return join(app.getPath("userData"), "usage-cache.json"); }
 function loadCachedUsage(): ProviderUsage[] {
@@ -403,6 +406,44 @@ function saveCachedUsage(values: ProviderUsage[]): void {
     writeFileSync(temporary, JSON.stringify(cached, null, 2), { mode: 0o600 });
     renameSync(temporary, cachePath());
   } catch { /* Cache is an enhancement; usage must continue without it. */ }
+}
+
+/** Phone pairing, mirroring the native app: the LAN server hands a phone the PWA and the
+ * plaintext snapshot, while the encrypted ntfy relay keeps it updated off the network. */
+function publishSnapshot(values: typeof lastUsage): void {
+  if (!pairing) return;
+  const current = settings.load();
+  const visible = values.filter((provider) => current.enabledProviders.includes(provider.kind) && provider.available);
+  ntfyPublisher.publish(visible, pairing.currentSecret, current.ntfyServer);
+}
+/** A custom HTTPS URL keeps remote access and PWA installation; without one the phone
+ * pairs against this machine over the local network. */
+function pwaBaseURL(): string | null {
+  const custom = settings.load().customPwaUrl;
+  return custom.length > 0 ? custom : localPWAServer.baseURL;
+}
+function pairingInfo(): PairingInfo {
+  const current = settings.load();
+  const base = pwaBaseURL();
+  const localUrl = localPWAServer.baseURL;
+  return {
+    words: pairing?.words ?? [],
+    link: base && pairing ? pairing.pairingLink(base, current.ntfyServer, localUrl) : "",
+    qrDataUrl: base && pairing ? pairing.qrDataURL(base, current.ntfyServer, localUrl) : "",
+    localUrl,
+    ntfyServer: current.ntfyServer,
+    localServerPort: current.localServerPort,
+    customPwaUrl: current.customPwaUrl
+  };
+}
+function startPairing(): void {
+  pairing = new PairingStore();
+  localPWAServer.setSnapshotTokens([pairing.snapshotToken, pairing.localToken]);
+  ntfyPublisher.onSnapshot = (payload) => localPWAServer.updateSnapshot(payload);
+  // The QR code carries the LAN address, so it has to be redrawn once the server binds
+  // or the machine's address changes.
+  localPWAServer.onURLChange = () => { window?.webContents.send("metria:pairing-changed"); };
+  localPWAServer.start(settings.load().localServerPort);
 }
 function loginItemStatus(): { available: boolean; enabled: boolean; message: string } {
   if (process.platform === "linux") { const path = linuxAutostartPath(); return { available: true, enabled: existsSync(path), message: existsSync(path) ? "Metria Electron starts through your desktop autostart entry." : "Metria Electron does not start automatically." }; }
@@ -436,7 +477,7 @@ if (process.platform === "linux") {
 }
 if (hasSingleInstanceLock) app.whenReady().then(() => {
   lastUsage = loadCachedUsage();
-  if (settings.load().showTray) createTray(); initAutoUpdater();
+  if (settings.load().showTray) createTray(); initAutoUpdater(); startPairing();
   if (supportsWidget() && settings.load().showWidget) {
     widgetWindow = createWidgetWindow();
     widgetWindow.setBounds(widgetBounds(displayArea(), 0));
@@ -584,7 +625,40 @@ if (hasSingleInstanceLock) app.whenReady().then(() => {
     void usage();
     return next;
   });
+  ipcMain.handle("metria:get-pairing", (event) => { requireTrustedSender(event); return pairingInfo(); });
+  ipcMain.handle("metria:regenerate-pairing", (event) => {
+    requireTrustedSender(event);
+    if (!pairing) throw new Error("Pairing is not ready.");
+    pairing.regenerate();
+    localPWAServer.setSnapshotTokens([pairing.snapshotToken, pairing.localToken]);
+    publishSnapshot(lastUsage);
+    return pairingInfo();
+  });
+  ipcMain.handle("metria:set-ntfy-server", (event, server: unknown) => {
+    requireTrustedSender(event);
+    if (typeof server !== "string") throw new Error("Invalid ntfy server.");
+    settings.setNtfyServer(server);
+    publishSnapshot(lastUsage);
+    return pairingInfo();
+  });
+  ipcMain.handle("metria:set-local-server-port", (event, port: unknown) => {
+    requireTrustedSender(event);
+    if (typeof port !== "number" || !Number.isInteger(port) || port <= 0 || port > 65_535) throw new Error("Invalid local server port.");
+    localPWAServer.start(settings.setLocalServerPort(port).localServerPort);
+    return pairingInfo();
+  });
+  ipcMain.handle("metria:set-custom-pwa-url", (event, url: unknown) => {
+    requireTrustedSender(event);
+    if (typeof url !== "string") throw new Error("Invalid PWA URL.");
+    settings.setCustomPwaUrl(url);
+    return pairingInfo();
+  });
+  ipcMain.handle("metria:copy-text", (event, text: unknown) => {
+    requireTrustedSender(event);
+    if (typeof text !== "string") throw new Error("Invalid text.");
+    clipboard.writeText(text);
+  });
   restartRefreshTimer();
 });
 app.on("window-all-closed", () => { /* Metria remains available through the tray. */ });
-app.on("before-quit", () => { isQuitting = true; if (refreshTimer) clearInterval(refreshTimer); if (updateTimer) clearInterval(updateTimer); });
+app.on("before-quit", () => { isQuitting = true; if (refreshTimer) clearInterval(refreshTimer); if (updateTimer) clearInterval(updateTimer); localPWAServer.stop(); ntfyPublisher.stop(); });

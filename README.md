@@ -64,7 +64,7 @@ Credentials are never committed. Metria reads them at runtime from the documente
 
 ## Mobile PWA
 
-This version does not include phone pairing, the local PWA server, QR pairing, or mobile alerts. Those features belong to the native macOS application.
+Phone pairing, the local PWA server, QR pairing, and the encrypted ntfy relay are available here too, and interoperate with the native macOS app. See [Phone pairing](#phone-pairing).
 
 ## Requirements
 
@@ -122,6 +122,28 @@ The updater uses the dedicated `electron-latest` channel in this repository.
 - The preload exposes only typed, allowlisted `window.metria` methods.
 - Every IPC method validates its sender and arguments.
 - The app uses local packaged content and does not share storage with the native macOS app.
+
+## Phone pairing
+
+Settings -> Pair your phone shows the same QR code and 12-word phrase the native
+macOS app shows, and the pairing derivations are byte-identical, so a phone can
+be paired with either app:
+
+- `src/main/pairing-secret.ts` mirrors the native app's `PairingSecret`: one
+  128-bit secret, HKDF-SHA256 for the ntfy topic, the AES-256 key, and the local
+  `/snapshot` token, and the BIP-39 phrase that carries the same entropy.
+- The secret lives in `pairing.json` inside the app's own data folder, written
+  0600 and encrypted with Electron's `safeStorage` (DPAPI on Windows, the login
+  keyring on Linux) whenever the platform provides OS-backed encryption.
+- `src/main/local-pwa-server.ts` serves the PWA bundled in `resources/pwa` over
+  the LAN, plus `/snapshot` -- the plaintext snapshot, released only to a request
+  carrying a pairing-derived token. Only the PWA's own file names are served;
+  paths are matched against a fixed list, never resolved on disk.
+- `src/main/ntfy.ts` posts each refreshed snapshot to the pairing topic on an
+  HTTPS ntfy server, sealed with AES-256-GCM in CryptoKit's combined layout, so
+  the relay only ever sees ciphertext and a derived topic name.
+- `src/main/qr.ts` draws the pairing link as a QR code (byte mode, correction
+  level M). Its test decodes the drawn code with the PWA's vendored jsQR.
 
 ## Contributing
 
