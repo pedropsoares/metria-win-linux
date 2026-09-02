@@ -279,6 +279,18 @@ function updateTrayVisibility(): void {
   }
 }
 
+function showWidgetMenu(): void {
+  if (!widgetWindow) return;
+  Menu.buildFromTemplate([
+    { label: "Open dashboard", click: showDashboard },
+    { label: "Refresh", click: () => { void usage(); } },
+    { type: "separator" },
+    { label: "Settings", click: () => { showDashboard(); window?.webContents.send("metria:open-settings"); } },
+    { type: "separator" },
+    { label: "Quit Metria", click: () => { isQuitting = true; app.quit(); } }
+  ]).popup({ window: widgetWindow });
+}
+
 function createTray(): void {
   const assetIcon = findAsset("metria-mascot.png");
   const icon = assetIcon
@@ -411,6 +423,7 @@ if (hasSingleInstanceLock) app.whenReady().then(() => {
   void usage();
   ipcMain.handle("metria:get-usage", (event) => { requireTrustedSender(event); return usage(); });
   ipcMain.handle("metria:open-dashboard", (event) => { requireTrustedSender(event); showDashboard(); });
+  ipcMain.handle("metria:widget-context-menu", (event) => { requireTrustedSender(event); showWidgetMenu(); });
   ipcMain.handle("metria:provider-hover", (event, index: unknown) => {
     requireTrustedSender(event);
     if (index === null) { scheduleCardHide(); return; }

@@ -346,6 +346,7 @@ function Dashboard(): JSX.Element {
     else if (usage.isError) setStatus("Metria could not refresh usage.");
     else if (usage.isSuccess) setStatus(`Updated ${new Intl.DateTimeFormat(undefined, { timeStyle: "short" }).format(new Date())}`);
   }, [usage.status, usage.isFetching, usage.isSuccess, usage.isError]);
+  useEffect(() => { window.metria.onOpenSettings(() => setSettingsOpen(true)); }, []);
   return (
     <main className="mx-auto max-w-[880px] px-[clamp(24px,5vw,56px)] py-[clamp(24px,5vw,56px)]">
       <header className="flex items-center justify-between gap-6 border-b border-line pb-[22px]">
