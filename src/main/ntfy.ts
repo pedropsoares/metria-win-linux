@@ -1,3 +1,4 @@
+import { httpFetch } from "./http";
 import { encryptionKeyFromSecret, topicFromSecret } from "./pairing-secret";
 import { buildSnapshot, sealSnapshot } from "./snapshot";
 import type { ProviderUsage } from "../shared/types";
@@ -30,12 +31,19 @@ export class NtfyPublisher {
     this.inFlight?.abort();
     const controller = new AbortController();
     this.inFlight = controller;
-    void fetch(topicURL, {
+    void httpFetch()(topicURL.href, {
       method: "POST",
       body: sealSnapshot(payload, encryptionKeyFromSecret(secret)),
       headers: { "Content-Type": "text/plain", Priority: "low" },
       signal: controller.signal
-    }).catch(() => undefined);
+    }).then((response) => {
+      // A failed publish leaves paired phones showing stale data with nothing on
+      // screen to explain it, so say why rather than discarding the reason.
+      if (!response.ok) console.error(`Metria relay publish failed: ntfy returned ${response.status}.`);
+    }).catch((error: unknown) => {
+      if (controller.signal.aborted) return; // Superseded by a newer snapshot.
+      console.error("Metria relay publish failed:", error instanceof Error ? error.message : String(error));
+    });
   }
 
   stop(): void { this.inFlight?.abort(); this.inFlight = undefined; }

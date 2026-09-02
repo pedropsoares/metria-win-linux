@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import type { AppSettings, ProviderKind, ProviderSourceChoice, ProviderSourceInfo, ProviderUsage, UsageWindow, WslPresence } from "../shared/types";
 import { PRESENCE_CACHE_TTL_MS } from "../shared/types";
+import { asRequestError, httpFetch } from "./http";
 import { readCursorItem } from "./cursor-state";
 import { providerPaths, type ProviderPaths } from "./provider-paths";
 import { makeWslShell, type WslProviderPresence, type WslShell } from "./wsl";
@@ -257,7 +258,7 @@ async function fetchWithTimeout(url: string, headers: Record<string, string>, op
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
-    return await fetch(url, { method: options?.method ?? "GET", body: options?.body, headers: { ...headers, "User-Agent": "Metria-Electron/0.1" }, signal: controller.signal });
+    return await httpFetch()(url, { method: options?.method ?? "GET", body: options?.body, headers: { ...headers, "User-Agent": "Metria-Electron/0.1" }, signal: controller.signal });
   } finally {
     clearTimeout(timer);
   }
@@ -283,7 +284,7 @@ async function requestWithRetry(url: string, headers: Record<string, string>, op
       }
       throw new HttpError(response.status === 429 ? "The provider rate limited Metria. Try again shortly." : `The provider returned ${response.status}.`, response.status);
     } catch (error) {
-      lastError = error instanceof Error ? error : new Error(String(error));
+      lastError = asRequestError(error);
       if (attempt === 2) throw lastError;
     }
   }
