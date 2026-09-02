@@ -1,15 +1,16 @@
-# Metria Electron
+# Metria Win/Linux
 
-This is a parallel Electron implementation of Metria for Windows and Linux.
+This is the Windows/Linux desktop implementation of Metria, built with Electron.
 It does the same job as the native macOS application, but it is a separate app
 and does not replace or import the native SwiftUI/AppKit code. macOS is served
-exclusively by the native app, so Electron releases carry Windows/Linux
-installers only.
+exclusively by the native app, so this project ships Windows/Linux installers
+only.
+
+Releases: https://github.com/yurirxmos/metria-win-linux/releases
 
 ## Development
 
 ```sh
-cd apps/electron
 npm ci
 npm run check
 npm run dev
@@ -17,9 +18,8 @@ npm run package
 ```
 
 `npm run package` creates host-native Electron artifacts in `release/`; it does
-not publish them. macOS packaging is not configured, so on macOS use the native
-app instead, which remains verified from the repository root with
-`swift build`.
+not publish them. macOS packaging is not configured. Use the native Metria
+repository for the macOS app.
 
 ## Architecture and security
 
@@ -68,3 +68,14 @@ Windows/Linux.
 
 Windows and Linux packages must be created and runtime-tested on those systems;
 they are not claimed as verified from macOS.
+
+## Releases
+
+Push an `electron-v*` tag to package and publish Windows and Linux artifacts:
+
+```sh
+git tag electron-v0.2.0
+git push origin electron-v0.2.0
+```
+
+The updater uses the `electron-latest` release channel in this repository.

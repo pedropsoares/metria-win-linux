@@ -174,7 +174,7 @@ function formatReset(resetDate: string | null): string {
 function findAsset(name: string): string | undefined {
   const candidates = app.isPackaged
     ? [join(process.resourcesPath, "MetriaPWA", name)]
-    : [join(app.getAppPath(), "..", "..", "Assets", name), join(app.getAppPath(), "..", "pwa", "public", name)];
+    : [join(app.getAppPath(), "resources", "assets", name)];
   return candidates.find((candidate) => existsSync(candidate));
 }
 const FALLBACK_ICON = "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxOCIgaGVpZ2h0PSIxOCIgdmlld0JveD0iMCAwIDE4IDE4Ij48cmVjdCB3aWR0aD0iMTgiIGhlaWdodD0iMTgiIHJ4PSI0IiBmaWxsPSIjMDAwIi8+PHBhdGggZD0iTTMgMTNoMlY5SDN6bTQgMGgyVjVIOXptNCAwaDJWN0gxMXptNCAwaDJWM0gxNXoiIGZpbGw9IiNmNGY2ZjgiLz48L3N2Zz4=";

@@ -1,0 +1,80 @@
+name: Windows and Linux release
+
+on:
+  push:
+    tags:
+      - "electron-v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release tag, for example electron-v0.1.6"
+        required: true
+        default: "electron-v0.1.6"
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    strategy:
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            target: linux
+          - runner: windows-latest
+            target: win
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      - name: Set package version
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ inputs.version || github.ref_name }}
+        run: |
+          [[ "$RELEASE_TAG" == electron-v* ]]
+          npm version "${RELEASE_TAG#electron-v}" --no-git-tag-version --allow-same-version
+      - name: Package
+        run: npm run package
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      - name: Upload package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: metria-win-linux-${{ matrix.target }}
+          path: release/**
+
+  publish:
+    needs: package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download package artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: metria-win-linux-*
+          merge-multiple: true
+          path: release
+      - name: Attach to GitHub Releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.version || github.ref_name }}
+        run: |
+          [[ "$RELEASE_TAG" == electron-v* ]]
+          artifacts="$(find release -maxdepth 1 -type f \( -name 'Metria-Electron-Setup-*.exe' -o -name 'Metria-Electron-*.AppImage' -o -name 'latest.yml' -o -name 'latest-linux.yml' \))"
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" $artifacts --clobber --repo "${{ github.repository }}"
+          else
+            gh release create "$RELEASE_TAG" $artifacts --title "$RELEASE_TAG" --generate-notes --repo "${{ github.repository }}"
+          fi
+          if gh release view electron-latest >/dev/null 2>&1; then
+            gh release upload electron-latest $artifacts --clobber --repo "${{ github.repository }}"
+          else
+            gh release create electron-latest $artifacts --title "Electron latest" --notes "Metria Windows/Linux update channel." --repo "${{ github.repository }}"
+          fi

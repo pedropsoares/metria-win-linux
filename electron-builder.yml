@@ -1,6 +1,6 @@
 appId: com.metria.electron
 productName: Metria Electron
-icon: ../Assets/metria-mascot.png
+icon: resources/assets/metria-mascot.png
 directories:
   output: release
   buildResources: resources
@@ -8,7 +8,7 @@ files:
   - dist/**
   - package.json
 extraResources:
-  - from: ../Assets
+  - from: resources/assets
     to: MetriaPWA
 win:
   target:
@@ -22,4 +22,4 @@ linux:
   artifactName: Metria-Electron-${version}-${arch}.${ext}
 publish:
   provider: generic
-  url: https://github.com/yurirxmos/metria/releases/download/electron-latest/
+  url: https://github.com/yurirxmos/metria-win-linux/releases/download/electron-latest/
