@@ -19,9 +19,11 @@
 - [Download](#download)
 - [To do](#to-do)
 - [Providers](#providers)
+- [Phone pairing](#phone-pairing)
 - [Requirements](#requirements)
 - [Quick start](#quick-start)
 - [Project layout](#project-layout)
+- [Related repositories](#related-repositories)
 - [Contributing](#contributing)
 - [License](#license)
 
@@ -62,9 +64,27 @@ Providers are discovered on the host filesystem and, on Windows, in installed WS
 
 Credentials are never committed. Metria reads them at runtime from the documented local sources.
 
-## Mobile PWA
+## Phone pairing
 
-Phone pairing, the local PWA server, QR pairing, and the encrypted ntfy relay are available here too, and interoperate with the native macOS app. See [Phone pairing](#phone-pairing).
+Settings -> Pair your phone shows the same QR code and 12-word phrase the native
+macOS app shows, and the pairing derivations are byte-identical, so a phone can
+be paired with either app:
+
+- `src/main/pairing-secret.ts` mirrors the native app's `PairingSecret`: one
+  128-bit secret, HKDF-SHA256 for the ntfy topic, the AES-256 key, and the local
+  `/snapshot` token, and the BIP-39 phrase that carries the same entropy.
+- The secret lives in `pairing.json` inside the app's own data folder, written
+  0600 and encrypted with Electron's `safeStorage` (DPAPI on Windows, the login
+  keyring on Linux) whenever the platform provides OS-backed encryption.
+- `src/main/local-pwa-server.ts` serves the PWA bundled in `resources/pwa` over
+  the LAN, plus `/snapshot` -- the plaintext snapshot, released only to a request
+  carrying a pairing-derived token. Only the PWA's own file names are served;
+  paths are matched against a fixed list, never resolved on disk.
+- `src/main/ntfy.ts` posts each refreshed snapshot to the pairing topic on an
+  HTTPS ntfy server, sealed with AES-256-GCM in CryptoKit's combined layout, so
+  the relay only ever sees ciphertext and a derived topic name.
+- `src/main/qr.ts` draws the pairing link as a QR code (byte mode, correction
+  level M). Its test decodes the drawn code with the PWA's vendored jsQR.
 
 ## Requirements
 
@@ -111,8 +131,10 @@ The updater uses the dedicated `electron-latest` channel in this repository.
 - `src/preload/`: the typed `window.metria` context bridge.
 - `src/renderer/`: sandboxed React dashboard, widget, and usage card.
 - `src/shared/`: shared TypeScript types and provider presentation helpers.
-- `src/test/`: provider, path, and WSL fixture tests.
-- `resources/`: Electron icons and bundled provider assets.
+- `src/test/`: provider, path, WSL, pairing, snapshot, and QR fixture tests.
+- `resources/assets/`: Electron icons and the provider logos the renderer draws.
+- `resources/pwa/`: the mobile PWA the local pairing server hands to a phone.
+- `plans/`: the design document behind the Cursor provider.
 - `.github/workflows/electron-release.yml`: Windows/Linux release automation.
 
 ## Architecture and security
@@ -122,28 +144,24 @@ The updater uses the dedicated `electron-latest` channel in this repository.
 - The preload exposes only typed, allowlisted `window.metria` methods.
 - Every IPC method validates its sender and arguments.
 - The app uses local packaged content and does not share storage with the native macOS app.
+- The local pairing server serves a fixed list of file names and never resolves a request path on disk, and releases `/snapshot` only to a request carrying a pairing-derived token.
+- The pairing secret is stored 0600 and encrypted with Electron's `safeStorage` (DPAPI on Windows, the login keyring on Linux) wherever the platform provides OS-backed encryption.
 
-## Phone pairing
+## Related repositories
 
-Settings -> Pair your phone shows the same QR code and 12-word phrase the native
-macOS app shows, and the pairing derivations are byte-identical, so a phone can
-be paired with either app:
+Metria is one product across three codebases. This repository is the Windows and
+Linux desktop app.
 
-- `src/main/pairing-secret.ts` mirrors the native app's `PairingSecret`: one
-  128-bit secret, HKDF-SHA256 for the ntfy topic, the AES-256 key, and the local
-  `/snapshot` token, and the BIP-39 phrase that carries the same entropy.
-- The secret lives in `pairing.json` inside the app's own data folder, written
-  0600 and encrypted with Electron's `safeStorage` (DPAPI on Windows, the login
-  keyring on Linux) whenever the platform provides OS-backed encryption.
-- `src/main/local-pwa-server.ts` serves the PWA bundled in `resources/pwa` over
-  the LAN, plus `/snapshot` -- the plaintext snapshot, released only to a request
-  carrying a pairing-derived token. Only the PWA's own file names are served;
-  paths are matched against a fixed list, never resolved on disk.
-- `src/main/ntfy.ts` posts each refreshed snapshot to the pairing topic on an
-  HTTPS ntfy server, sealed with AES-256-GCM in CryptoKit's combined layout, so
-  the relay only ever sees ciphertext and a derived topic name.
-- `src/main/qr.ts` draws the pairing link as a QR code (byte mode, correction
-  level M). Its test decodes the drawn code with the PWA's vendored jsQR.
+| Repository | What it holds |
+|---|---|
+| [pedropsoares/metria-win-linux](https://github.com/pedropsoares/metria-win-linux) (here) | The Windows and Linux Electron app. Fork of [yurirxmos/metria-win-linux](https://github.com/yurirxmos/metria-win-linux). |
+| [pedropsoares/metria](https://github.com/pedropsoares/metria) | The native macOS app and the mobile PWA. Fork of [yurirxmos/metria](https://github.com/yurirxmos/metria). |
+| [pedropsoares/metria-ios](https://github.com/pedropsoares/metria-ios) | The native iOS app and its Home Screen and Lock Screen widgets. |
+
+`src/main/pairing-secret.ts` is a port of the macOS app's `PairingSecret.swift`,
+and `resources/pwa` is a copy of that repository's `apps/pwa/public`. Both must
+stay byte-compatible: one phone pairs with either desktop app, so changing a
+derivation in one repository without the others breaks pairing.
 
 ## Contributing
 
