@@ -1,11 +1,11 @@
 import { app, BrowserWindow, ipcMain, Menu, nativeImage, screen, shell, Tray } from "electron";
 import { autoUpdater } from "electron-updater";
 import { dirname, join } from "node:path";
-import { existsSync, mkdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { ALL_PROVIDER_KINDS, CARD_WIDTH, isProviderKind, PROVIDER_LOGOS, providerShortLabel, WIDGET_ITEM_HEIGHT } from "../shared/types";
 import { ProviderService } from "./providers";
 import { SettingsStore } from "./settings";
-import type { ProviderKind, ProviderSourceChoice, ProviderUsage } from "../shared/types";
+import type { AppSettings, ProviderKind, ProviderSourceChoice, ProviderUsage } from "../shared/types";
 
 let window: BrowserWindow | undefined;
 let widgetWindow: BrowserWindow | undefined;
@@ -51,14 +51,26 @@ const WIDGET_WIDTH = 88;
 const WIDGET_ITEM_GAP = 8;
 const WIDGET_PADDING = 12;
 function supportsWidget(): boolean { return process.platform === "win32" || process.platform === "linux"; }
+function display(): Electron.Display {
+  const selected = settings.load().widgetDisplayId;
+  return screen.getAllDisplays().find((candidate) => String(candidate.id) === selected) ?? screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+}
 function displayArea(): Electron.Rectangle {
-  return screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;
+  return display().workArea;
 }
 function widgetBounds(area: Electron.Rectangle, providerCount: number): Electron.Rectangle {
-  const height = Math.max(76, providerCount * WIDGET_ITEM_HEIGHT + (Math.max(0, providerCount - 1) * WIDGET_ITEM_GAP) + WIDGET_PADDING * 2);
-  const offset = settings.load().widgetYOffset;
-  const y = Math.min(Math.max(area.y + offset, area.y), Math.max(area.y, area.y + area.height - height));
-  return { x: area.x + area.width - WIDGET_WIDTH - 12, y, width: WIDGET_WIDTH, height };
+  const current = settings.load();
+  const scale = current.widgetSize === "small" ? 0.85 : current.widgetSize === "large" ? 1.15 : 1;
+  const thickness = Math.round(WIDGET_WIDTH * scale);
+  const extent = Math.max(76, Math.round(providerCount * WIDGET_ITEM_HEIGHT * scale + Math.max(0, providerCount - 1) * WIDGET_ITEM_GAP * scale + WIDGET_PADDING * 2 * scale));
+  const vertical = current.widgetPosition === "left" || current.widgetPosition === "right";
+  const width = vertical ? thickness : extent;
+  const height = vertical ? extent : thickness;
+  const offset = current.widgetAlongEdgeOffset || current.widgetYOffset;
+  const along = vertical ? Math.min(Math.max(area.y + offset, area.y), Math.max(area.y, area.y + area.height - height)) : Math.min(Math.max(area.x + offset, area.x), Math.max(area.x, area.x + area.width - width));
+  const x = current.widgetPosition === "left" ? area.x : current.widgetPosition === "right" ? area.x + area.width - width : along;
+  const y = current.widgetPosition === "top" ? area.y : current.widgetPosition === "bottom" ? area.y + area.height - height : along;
+  return { x, y, width, height };
 }
 function createWidgetWindow(): BrowserWindow {
   const widget = new BrowserWindow({
@@ -77,7 +89,7 @@ function updateWidgetBounds(values: typeof lastUsage): void {
   if (!widgetWindow) return;
   const enabled = settings.load().enabledProviders;
   const count = values.filter((provider) => enabled.includes(provider.kind) && provider.available).length;
-  widgetWindow.setBounds(widgetBounds(displayArea(), count));
+    widgetWindow.setBounds(widgetBounds(displayArea(), count));
   if (cardActiveIndex !== null) positionCard(cardActiveIndex);
 }
 
@@ -148,14 +160,24 @@ function cardBounds(index: number, height?: number): Electron.Rectangle {
   const area = widgetWindow?.getBounds();
   const workArea = displayArea();
   const cardHeight = height ?? 200;
-  const anchorTop = (area ?? workArea).y;
-  const itemCenterY = anchorTop + WIDGET_PADDING + index * (WIDGET_ITEM_HEIGHT + WIDGET_ITEM_GAP) + WIDGET_ITEM_HEIGHT / 2;
-  // Vertically center the card on the hovered item.
-  const minY = workArea.y + 8;
-  const maxY = workArea.y + workArea.height - cardHeight - 8;
-  const y = Math.min(Math.max(itemCenterY - cardHeight / 2, minY), Math.max(minY, maxY));
-  const anchorX = area ? area.x : workArea.x + workArea.width;
-  const x = anchorX - CARD_SPACING - CARD_WIDTH;
+  const current = settings.load();
+  const vertical = current.widgetPosition === "left" || current.widgetPosition === "right";
+  const itemOffset = WIDGET_PADDING + index * (WIDGET_ITEM_HEIGHT + WIDGET_ITEM_GAP) + WIDGET_ITEM_HEIGHT / 2;
+  if (vertical) {
+    const itemCenterY = (area ?? workArea).y + itemOffset;
+    const minY = workArea.y + 8;
+    const maxY = workArea.y + workArea.height - cardHeight - 8;
+    const y = Math.min(Math.max(itemCenterY - cardHeight / 2, minY), Math.max(minY, maxY));
+    const anchorX = area?.x ?? (current.widgetPosition === "right" ? workArea.x + workArea.width : workArea.x);
+    const x = current.widgetPosition === "right" ? anchorX - CARD_SPACING - CARD_WIDTH : anchorX + (area?.width ?? 0) + CARD_SPACING;
+    return { x, y, width: CARD_WIDTH, height: cardHeight };
+  }
+  const itemCenterX = (area ?? workArea).x + itemOffset;
+  const minX = workArea.x + 8;
+  const maxX = workArea.x + workArea.width - CARD_WIDTH - 8;
+  const x = Math.min(Math.max(itemCenterX - CARD_WIDTH / 2, minX), Math.max(minX, maxX));
+  const anchorY = area?.y ?? (current.widgetPosition === "bottom" ? workArea.y + workArea.height : workArea.y);
+  const y = current.widgetPosition === "bottom" ? anchorY - CARD_SPACING - cardHeight : anchorY + (area?.height ?? 0) + CARD_SPACING;
   return { x, y, width: CARD_WIDTH, height: cardHeight };
 }
 
@@ -230,6 +252,32 @@ function updateTray(providers: typeof lastUsage): void {
   tray.setContextMenu(buildTrayMenu(rows));
 }
 
+function broadcastSettings(): void {
+  for (const target of [window, widgetWindow, cardWindow]) target?.webContents.send("metria:settings-changed");
+}
+
+function recreateWidget(): void {
+  if (!settings.load().showWidget) {
+    widgetWindow?.destroy();
+    widgetWindow = undefined;
+    hideCard();
+    return;
+  }
+  widgetWindow?.destroy();
+  widgetWindow = createWidgetWindow();
+  updateWidgetBounds(lastUsage);
+  widgetWindow.showInactive();
+}
+
+function updateTrayVisibility(): void {
+  if (settings.load().showTray) {
+    if (!tray) createTray();
+  } else if (tray) {
+    tray.destroy();
+    tray = undefined;
+  }
+}
+
 function createTray(): void {
   const assetIcon = findAsset("metria-mascot.png");
   const icon = assetIcon
@@ -294,7 +342,32 @@ function requireTrustedSender(event: Electron.IpcMainInvokeEvent): void {
 }
 // The dashboard must show every provider (enabled or not) so users can re-enable
 // from there; taps, badges, and the widget keep filtering by enabledProviders.
-async function usage() { const values = await providers.fetch(ALL_PROVIDER_KINDS); lastUsage = values; updateTray(values); if (supportsWidget()) { updateWidgetBounds(values); refreshCard(); } else updateBadges(values); return values; }
+async function usage() {
+  const values = (await providers.fetch(ALL_PROVIDER_KINDS)).map((value) => {
+    const cached = lastUsage.find((entry) => entry.kind === value.kind);
+    return value.error && cached?.windows.length ? { ...value, accountLabel: value.accountLabel ?? cached.accountLabel, windows: cached.windows, updatedAt: cached.updatedAt } : value;
+  });
+  lastUsage = values;
+  const fresh = values.filter((value) => value.windows.length && !value.error);
+  if (fresh.length) saveCachedUsage(values);
+  updateTray(values); if (supportsWidget()) { updateWidgetBounds(values); refreshCard(); } else updateBadges(values); return values;
+}
+function cachePath(): string { return join(app.getPath("userData"), "usage-cache.json"); }
+function loadCachedUsage(): ProviderUsage[] {
+  try {
+    const parsed = JSON.parse(readFileSync(cachePath(), "utf8")) as unknown;
+    return Array.isArray(parsed) ? parsed.filter((value): value is ProviderUsage => typeof value === "object" && value !== null && isProviderKind((value as ProviderUsage).kind) && Array.isArray((value as ProviderUsage).windows)).map((value) => ({ ...value, error: null, available: true })) : [];
+  } catch { return []; }
+}
+function saveCachedUsage(values: ProviderUsage[]): void {
+  try {
+    mkdirSync(join(app.getPath("userData")), { recursive: true });
+    const cached = values.filter((value) => value.windows.length).map(({ kind, accountLabel, windows, updatedAt }) => ({ kind, accountLabel, windows, updatedAt }));
+    const temporary = `${cachePath()}.tmp`;
+    writeFileSync(temporary, JSON.stringify(cached, null, 2), { mode: 0o600 });
+    renameSync(temporary, cachePath());
+  } catch { /* Cache is an enhancement; usage must continue without it. */ }
+}
 function loginItemStatus(): { available: boolean; enabled: boolean; message: string } {
   if (process.platform === "linux") { const path = linuxAutostartPath(); return { available: true, enabled: existsSync(path), message: existsSync(path) ? "Metria Electron starts through your desktop autostart entry." : "Metria Electron does not start automatically." }; }
   const enabled = app.getLoginItemSettings().openAtLogin;
@@ -326,8 +399,9 @@ if (process.platform === "linux") {
   app.disableHardwareAcceleration();
 }
 if (hasSingleInstanceLock) app.whenReady().then(() => {
-  createTray(); showDashboard(); initAutoUpdater();
-  if (supportsWidget()) {
+  lastUsage = loadCachedUsage();
+  if (settings.load().showTray) createTray(); showDashboard(); initAutoUpdater();
+  if (supportsWidget() && settings.load().showWidget) {
     widgetWindow = createWidgetWindow();
     widgetWindow.setBounds(widgetBounds(displayArea(), 0));
     widgetWindow.showInactive();
@@ -352,7 +426,7 @@ if (hasSingleInstanceLock) app.whenReady().then(() => {
     const next = settings.setProviderEnabled(kind, enabled);
     // The widget (notch) keeps its own settings snapshot; refresh it and the bounds now.
     updateWidgetBounds(lastUsage);
-    widgetWindow?.webContents.send("metria:settings-changed");
+    broadcastSettings();
     return next;
   });
   ipcMain.handle("metria:reconnect", async (event, kind: unknown) => {
@@ -369,15 +443,45 @@ if (hasSingleInstanceLock) app.whenReady().then(() => {
     // and never accumulate an offset outside the work area.
     const area = displayArea();
     const height = widgetWindow?.getBounds().height ?? 120;
-    const clamped = Math.max(0, Math.min(Math.round(offsetY), Math.max(0, area.height - height)));
+    const vertical = settings.load().widgetPosition === "left" || settings.load().widgetPosition === "right";
+    const extent = vertical ? height : (widgetWindow?.getBounds().width ?? 120);
+    const limit = vertical ? area.height - extent : area.width - extent;
+    const clamped = Math.max(0, Math.min(Math.round(offsetY), Math.max(0, limit)));
     const next = settings.setWidgetYOffset(clamped);
     updateWidgetBounds(lastUsage); refreshCard();
     return next;
+  });
+  ipcMain.handle("metria:set-widget-preferences", (event, preferences: unknown) => {
+    requireTrustedSender(event);
+    if (typeof preferences !== "object" || preferences === null) throw new Error("Invalid widget preferences.");
+    const next = settings.setWidgetPreferences(preferences as Partial<Pick<AppSettings, "showWidget" | "showTray" | "showAccountLabels" | "widgetBehavior" | "widgetPosition" | "widgetSize" | "widgetOpacity" | "widgetDisplayId" | "alerts">>);
+    recreateWidget();
+    updateTrayVisibility();
+    broadcastSettings();
+    return next;
+  });
+  ipcMain.handle("metria:set-window-visible", (event, kind: unknown, title: unknown, visible: unknown) => {
+    requireTrustedSender(event);
+    if (!isProviderKind(kind) || typeof title !== "string" || !title || typeof visible !== "boolean") throw new Error("Invalid usage window setting.");
+    const next = settings.setWindowVisible(kind, title, visible);
+    broadcastSettings();
+    return next;
+  });
+  ipcMain.handle("metria:diagnose", async (event, kind: unknown) => {
+    requireTrustedSender(event);
+    if (!isProviderKind(kind)) throw new Error("Invalid provider.");
+    const info = (await providers.sources([kind]))[0];
+    const usage = lastUsage.find((entry) => entry.kind === kind);
+    return [info.host ? "Host credentials detected." : "No host credentials detected.", info.wsl.filter((entry) => entry.present).map((entry) => `WSL ${entry.distro} data detected.`).join(" "), usage ? `${usage.windows.length} usage window(s) returned.` : "Metria has not received usage data yet.", usage?.updatedAt ? `Last update: ${new Date(usage.updatedAt).toLocaleString()}` : "", usage?.error ? `Latest issue: ${usage.error}` : ""].filter(Boolean).join("\n");
   });
   ipcMain.handle("metria:get-login-item-status", (event) => { requireTrustedSender(event); return loginItemStatus(); });
   ipcMain.handle("metria:app-info", (event) => {
     requireTrustedSender(event);
     return { version: app.getVersion(), platform: process.platform, packaged: app.isPackaged, dataPath: app.getPath("userData") };
+  });
+  ipcMain.handle("metria:get-displays", (event) => {
+    requireTrustedSender(event);
+    return screen.getAllDisplays().map((item) => ({ id: String(item.id), label: `${item.label || "Display"} (${item.bounds.width}x${item.bounds.height})` }));
   });
   ipcMain.handle("metria:check-updates", async (event) => {
     requireTrustedSender(event);

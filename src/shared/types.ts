@@ -8,6 +8,7 @@ export interface UsageWindow {
 
 export interface ProviderUsage {
   kind: ProviderKind;
+  accountLabel: string | null;
   windows: UsageWindow[];
   updatedAt: string | null;
   error: string | null;
@@ -15,11 +16,36 @@ export interface ProviderUsage {
   setupHint: string;
 }
 
+export type WidgetPosition = "top" | "bottom" | "left" | "right";
+export type WidgetSize = "small" | "medium" | "large";
+export type WidgetBehavior = "pinned" | "auto-hide";
+
+export interface AlertSettings {
+  enabled: boolean;
+  cautionThreshold: number;
+  warningThreshold: number;
+  criticalThreshold: number;
+  cautionColor: string;
+  warningColor: string;
+  criticalColor: string;
+}
+
 export interface AppSettings {
   refreshIntervalSeconds: number;
   enabledProviders: ProviderKind[];
   widgetYOffset: number;
+  widgetAlongEdgeOffset: number;
+  showWidget: boolean;
+  showTray: boolean;
+  showAccountLabels: boolean;
+  widgetBehavior: WidgetBehavior;
+  widgetPosition: WidgetPosition;
+  widgetSize: WidgetSize;
+  widgetOpacity: number;
+  widgetDisplayId: string | null;
   providerSource: Partial<Record<ProviderKind, ProviderSourceChoice>>;
+  hiddenUsageWindowTitles: Partial<Record<ProviderKind, string[]>>;
+  alerts: AlertSettings;
 }
 
 export interface CardShowPayload {
@@ -40,9 +66,13 @@ export interface MetriaApi {
   setProviderEnabled(kind: ProviderKind, enabled: boolean): Promise<AppSettings>;
   reconnect(kind: ProviderKind): Promise<{ command: string; message: string }>;
   setWidgetYOffset(offsetY: number): Promise<AppSettings>;
+  setWidgetPreferences(preferences: Partial<Pick<AppSettings, "showWidget" | "showTray" | "showAccountLabels" | "widgetBehavior" | "widgetPosition" | "widgetSize" | "widgetOpacity" | "widgetDisplayId" | "alerts">>): Promise<AppSettings>;
+  setWindowVisible(kind: ProviderKind, title: string, visible: boolean): Promise<AppSettings>;
+  diagnose(kind: ProviderKind): Promise<string>;
   getLoginItemStatus(): Promise<LoginItemStatus>;
   setLaunchAtLogin(enabled: boolean): Promise<LoginItemStatus>;
   getAppInfo(): Promise<AppInfo>;
+  getDisplays(): Promise<DisplayInfo[]>;
   checkUpdates(): Promise<UpdateCheckResult>;
   installUpdate(): Promise<void>;
   uninstall(): Promise<UninstallResult>;
@@ -51,6 +81,8 @@ export interface MetriaApi {
   getProviderSources(): Promise<ProviderSourceInfo[]>;
   setProviderSource(kind: ProviderKind, source: ProviderSourceChoice): Promise<AppSettings>;
 }
+
+export interface DisplayInfo { id: string; label: string; }
 
 export interface LoginItemStatus { available: boolean; enabled: boolean; message: string; }
 

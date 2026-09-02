@@ -2,7 +2,7 @@ import { useEffect, useState, type JSX } from "react";
 import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { CARD_WIDTH, clampPercent, gaugeColor, PROVIDER_LOGOS, providerShortLabel, statusDotColor } from "../shared/types";
-import type { CardShowPayload, ProviderUsage, UsageWindow } from "../shared/types";
+import type { AppSettings, CardShowPayload, ProviderUsage, UsageWindow } from "../shared/types";
 import "./app.css";
 
 const queryClient = new QueryClient({ defaultOptions: { queries: { refetchOnWindowFocus: false } } });
@@ -29,8 +29,9 @@ function resetText(resetDate: string | null): string {
   return `Resets ${new Date(resetDate).toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`;
 }
 
-function WindowRow({ window: row }: { window: UsageWindow }): JSX.Element {
+function WindowRow({ window: row, alerts }: { window: UsageWindow; alerts?: AppSettings["alerts"] }): JSX.Element {
   const percent = clampPercent(row.percent);
+  const color = alerts?.enabled && percent >= alerts.criticalThreshold ? alerts.criticalColor : alerts?.enabled && percent >= alerts.warningThreshold ? alerts.warningColor : alerts?.enabled && percent >= alerts.cautionThreshold ? alerts.cautionColor : gaugeColor(percent);
   return (
     <div className="mt-[18px] first:mt-0">
       <div className="flex items-baseline justify-between gap-3 text-[15px] leading-[1.2]">
@@ -38,7 +39,7 @@ function WindowRow({ window: row }: { window: UsageWindow }): JSX.Element {
         <span className="whitespace-nowrap text-xs text-mute">{resetText(row.resetDate)}</span>
       </div>
       <div className="my-2 h-[7px] overflow-hidden rounded-[99px] bg-[#2c2c2c]">
-        <i className="block h-full rounded-[99px]" style={{ background: gaugeColor(percent), width: `${percent}%` }} />
+       <i className="block h-full rounded-[99px]" style={{ background: color, width: `${percent}%` }} />
       </div>
       <div className="mt-2 text-[15px] font-semibold leading-none text-[#e8e8e8]">{Math.round(percent)}% Used</div>
     </div>
@@ -52,7 +53,10 @@ function Card(): JSX.Element {
     queryFn: () => window.metria.getUsage(),
     refetchOnWindowFocus: false
   });
+  const settings = useQuery({ queryKey: ["settings"], queryFn: () => window.metria.getSettings() });
+  useEffect(() => { window.metria.onSettingsChanged(() => { void queryClient.invalidateQueries({ queryKey: ["settings"] }); }); }, []);
   const provider = usage.data?.find((candidate) => candidate.kind === payload?.kind);
+  const visibleWindows = provider?.windows.filter((row) => !settings.data?.hiddenUsageWindowTitles[provider.kind]?.includes(row.title)) ?? [];
 
   useEffect(() => {
     const apply = (next: CardShowPayload | null): void => setPayload(next);
@@ -80,8 +84,10 @@ function Card(): JSX.Element {
         </div>
         {provider.error && <p className="mt-3 text-[12px] leading-[1.4] text-[#ff8d6c]">{provider.error}</p>}
       </>
+    ) : visibleWindows.length === 0 ? (
+      <div className="text-[13px] leading-[1.4] text-mute">All usage windows are hidden. Enable one in Settings.</div>
     ) : (
-      provider.windows.map((row) => <WindowRow key={row.title} window={row} />)
+      visibleWindows.map((row) => <WindowRow key={row.title} window={row} alerts={settings.data?.alerts} />)
     )
   ) : (
     <div className="flex items-center gap-2 text-[13px] leading-[1.4] text-mute">Waiting for usage data...</div>
@@ -94,6 +100,7 @@ function Card(): JSX.Element {
           <>
             <img className="h-[22px] w-[22px] shrink-0 object-contain" src={`./${PROVIDER_LOGOS[provider.kind]}`} alt="" />
             <span>{providerShortLabel(provider.kind)}</span>
+            {settings.data?.showAccountLabels && provider.accountLabel && <span className="text-xs text-mute">{provider.accountLabel}</span>}
             <span className="h-[7px] w-[7px] shrink-0 rounded-full" style={{ background: statusDotColor(provider.error !== null) }} />
           </>
         )}

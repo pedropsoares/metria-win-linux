@@ -92,20 +92,21 @@ class ClaudeProvider implements Provider {
   readonly hint = "Run `claude auth login` in your terminal to create local Claude Code credentials, then refresh Metria.";
   constructor(private readonly paths: ProviderPaths) {}
   hasHostCredentials(): boolean { return existsSync(this.paths.claudeCredentials); }
-  async fetchHost(): Promise<ProviderUsage> { return this.usage(this.readToken(this.paths.claudeCredentials)); }
-  async fetchWsl(shell: WslShell, distro: string): Promise<ProviderUsage> { return this.usage(this.readToken(await shell.readFile(distro, ".claude/.credentials.json"))); }
+  async fetchHost(): Promise<ProviderUsage> { const credentials = readFileSyncPath(this.paths.claudeCredentials); return this.usage(this.readToken(credentials), this.accountLabel(credentials)); }
+  async fetchWsl(shell: WslShell, distro: string): Promise<ProviderUsage> { const credentials = await shell.readFile(distro, ".claude/.credentials.json"); return this.usage(this.readToken(credentials), this.accountLabel(credentials)); }
   private readToken(credentials: string): string | undefined {
     try {
       return (JSON.parse(credentials) as { claudeAiOauth?: { accessToken?: string } }).claudeAiOauth?.accessToken;
     } catch { return undefined; }
   }
-  private async usage(token?: string): Promise<ProviderUsage> {
+  private accountLabel(credentials: string): string | null { try { const value = JSON.parse(credentials) as { email?: string; claudeAiOauth?: { email?: string } }; return value.email ?? value.claudeAiOauth?.email ?? null; } catch { return null; } }
+  private async usage(token: string | undefined, accountLabel: string | null): Promise<ProviderUsage> {
     if (!token) throw new Error("Claude Code credentials were not found. Run `claude auth login`.");
     const data = JSON.parse(await requestWithRetry("https://api.anthropic.com/api/oauth/usage", { Authorization: `Bearer ${token}`, "anthropic-beta": "oauth-2025-04-20" })) as { five_hour?: { utilization?: number; resets_at?: string }; seven_day?: { utilization?: number; resets_at?: string } };
     return loaded(this.kind, [
       { title: "Current session", percent: Number(data.five_hour?.utilization ?? 0), resetDate: data.five_hour?.resets_at ?? null },
       { title: "All models", percent: Number(data.seven_day?.utilization ?? 0), resetDate: data.seven_day?.resets_at ?? null }
-    ]);
+    ], accountLabel);
   }
 }
 
@@ -147,7 +148,7 @@ class OpenCodeGoProvider implements Provider {
     if (!key) throw new Error("OpenCode Go credentials were not found.");
     const data = await requestWithRetry("https://opencode.ai/zen/go/v1/usage", { Authorization: `Bearer ${key}` });
     const windows = parseOpenCodeGoWindows(data);
-    return loaded(this.kind, windows);
+    return loaded(this.kind, windows, maskKey(key));
   }
 }
 
@@ -209,7 +210,7 @@ async function openCodeRemoteUsage(auth: string): Promise<ProviderUsage | undefi
     return loaded("Codex", [["Current session", rateLimit.primary_window], ["All models", rateLimit.secondary_window]].flatMap(([title, limit]) => {
       const typed = limit as { used_percent?: number; reset_at?: number } | undefined;
       return typed?.used_percent === undefined ? [] : [{ title: String(title), percent: Number(typed.used_percent), resetDate: typed.reset_at ? new Date(typed.reset_at * 1000).toISOString() : null }];
-    }));
+    }), parsed.accountId);
   } catch { return undefined; }
 }
 
@@ -254,11 +255,15 @@ function newestSessionFile(path: string): string | undefined {
   return files.sort((left, right) => right.modified - left.modified)[0]?.path;
 }
 
+function readFileSyncPath(path: string): string {
+  try { return readFileSync(path, "utf8"); } catch { return ""; }
+}
 function readFileSyncPathOrEmpty(path: string): string {
   const newest = newestSessionFile(path);
   return newest ? readFileSync(newest, "utf8") : "";
 }
 
-function loaded(kind: ProviderKind, windows: UsageWindow[]): ProviderUsage { return { kind, windows, updatedAt: new Date().toISOString(), error: null, available: true, setupHint: "" }; }
+function loaded(kind: ProviderKind, windows: UsageWindow[], accountLabel: string | null = null): ProviderUsage { return { kind, accountLabel, windows, updatedAt: new Date().toISOString(), error: null, available: true, setupHint: "" }; }
 function empty(kind: ProviderKind): ProviderUsage { return { ...loaded(kind, []), error: "No current usage data was found." }; }
-function unavailable(kind: ProviderKind, setupHint: string): ProviderUsage { return { kind, windows: [], updatedAt: null, error: null, available: false, setupHint }; }
+function unavailable(kind: ProviderKind, setupHint: string): ProviderUsage { return { kind, accountLabel: null, windows: [], updatedAt: null, error: null, available: false, setupHint }; }
+function maskKey(key: string): string { return key.length > 8 ? `${key.slice(0, 4)}...${key.slice(-4)}` : "********"; }

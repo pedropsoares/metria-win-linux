@@ -2,11 +2,12 @@ import { useEffect, useState, type JSX } from "react";
 import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider, useMutation, useQuery } from "@tanstack/react-query";
 import { clampPercent, DEFAULT_REFRESH_INTERVAL_SECONDS, gaugeColor, PROVIDER_LOGOS, statusDotColor } from "../shared/types";
-import type { ProviderKind, ProviderSourceChoice, ProviderUsage, UsageWindow } from "../shared/types";
+import type { AppSettings, ProviderKind, ProviderSourceChoice, ProviderUsage, UsageWindow } from "../shared/types";
 import "./app.css";
 
 const queryClient = new QueryClient({ defaultOptions: { queries: { refetchOnWindowFocus: false } } });
 const SOURCES_KEY = ["provider-sources"] as const;
+const WINDOW_TITLES: Record<ProviderKind, string[]> = { Claude: ["Current session", "All models"], Codex: ["Current session", "All models"], "OpenCode Go": ["Current session", "This week", "This month"] };
 
 function useProviderSources() {
   return useQuery({ queryKey: SOURCES_KEY, queryFn: () => window.metria.getProviderSources() });
@@ -21,7 +22,15 @@ function sourceValue(source: ProviderSourceChoice | null): string {
 function percentage(value: number): string { return `${clampPercent(value).toFixed(0)}%`; }
 function date(value: string | null): string { return value ? `Resets ${new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(value))}` : "No reset time available"; }
 
-function UsageRow({ window: row }: { window: UsageWindow }): JSX.Element {
+function usageColor(percent: number, alerts?: AppSettings["alerts"]): string {
+  if (!alerts?.enabled) return gaugeColor(percent);
+  if (percent >= alerts.criticalThreshold) return alerts.criticalColor;
+  if (percent >= alerts.warningThreshold) return alerts.warningColor;
+  if (percent >= alerts.cautionThreshold) return alerts.cautionColor;
+  return gaugeColor(percent);
+}
+
+function UsageRow({ window: row, alerts }: { window: UsageWindow; alerts?: AppSettings["alerts"] }): JSX.Element {
   return (
     <div className="mt-[18px] first:mt-0">
       <div className="flex justify-between gap-4">
@@ -29,14 +38,14 @@ function UsageRow({ window: row }: { window: UsageWindow }): JSX.Element {
         <strong className="font-mono text-lg">{percentage(row.percent)}</strong>
       </div>
       <div className="my-[9px] h-2 overflow-hidden rounded-[99px] bg-[#1c1c1e]">
-        <i className="block h-full rounded-[99px]" style={{ background: gaugeColor(row.percent), width: percentage(row.percent) }} />
+       <i className="block h-full rounded-[99px]" style={{ background: usageColor(row.percent, alerts), width: percentage(row.percent) }} />
       </div>
       <small className="text-dim">{date(row.resetDate)}</small>
     </div>
   );
 }
 
-function ProviderCard({ provider, enabled, onStatus }: { provider: ProviderUsage; enabled: boolean; onStatus: (message: string) => void }): JSX.Element {
+function ProviderCard({ provider, enabled, showAccount, hiddenWindows, alerts, onStatus }: { provider: ProviderUsage; enabled: boolean; showAccount: boolean; hiddenWindows: string[]; alerts?: AppSettings["alerts"]; onStatus: (message: string) => void }): JSX.Element {
   const setEnabled = useMutation({
     mutationFn: (value: boolean) => window.metria.setProviderEnabled(provider.kind, value),
     onSuccess: (settings) => {
@@ -59,7 +68,8 @@ function ProviderCard({ provider, enabled, onStatus }: { provider: ProviderUsage
       <div className="flex items-center justify-between gap-[18px]">
         <div className="flex items-center gap-2.5">
           <img className="h-[22px] w-[22px] object-contain" src={`./${PROVIDER_LOGOS[provider.kind]}`} alt="" />
-          <h2 className="m-0 text-xl font-semibold">{provider.kind}</h2>
+           <h2 className="m-0 text-xl font-semibold">{provider.kind}</h2>
+           {showAccount && provider.accountLabel && <span className="text-xs text-mute">{provider.accountLabel}</span>}
           <span className="h-[7px] w-[7px] shrink-0 rounded-full" style={{ background: statusDotColor(provider.error !== null) }} />
         </div>
         <button
@@ -73,7 +83,8 @@ function ProviderCard({ provider, enabled, onStatus }: { provider: ProviderUsage
       </div>
       {!provider.available && <p className="m-0 mt-4 leading-relaxed text-dim">{provider.setupHint}</p>}
       {provider.error && <p className="m-0 mt-4 leading-relaxed text-dim">{provider.error}</p>}
-      {provider.windows.map((row) => <UsageRow key={row.title} window={row} />)}
+       {provider.windows.filter((row) => !hiddenWindows.includes(row.title)).map((row) => <UsageRow key={row.title} window={row} alerts={alerts} />)}
+       {provider.windows.length > 0 && provider.windows.every((row) => hiddenWindows.includes(row.title)) && <p className="mt-4 text-dim">All usage windows are hidden. Enable one in Settings.</p>}
     </article>
   );
 }
@@ -148,7 +159,19 @@ function SettingsModal({ onClose }: { onClose: () => void }): JSX.Element {
     onSuccess: (result) => setNotice(result.message)
   });
   const quit = useMutation({ mutationFn: () => window.metria.quit() });
-  const currentInterval = (useQuery({ queryKey: ["settings"], queryFn: () => window.metria.getSettings() }).data ?? { refreshIntervalSeconds: DEFAULT_REFRESH_INTERVAL_SECONDS }).refreshIntervalSeconds;
+  const settingsData = useQuery({ queryKey: ["settings"], queryFn: () => window.metria.getSettings() }).data;
+  const currentInterval = settingsData?.refreshIntervalSeconds ?? DEFAULT_REFRESH_INTERVAL_SECONDS;
+  const usageData = useQuery({ queryKey: ["usage"], queryFn: () => window.metria.getUsage() }).data ?? [];
+  const displays = useQuery({ queryKey: ["displays"], queryFn: () => window.metria.getDisplays() });
+  const setPreferences = useMutation({
+    mutationFn: (preferences: Partial<Pick<AppSettings, "showWidget" | "showTray" | "showAccountLabels" | "widgetBehavior" | "widgetPosition" | "widgetSize" | "widgetOpacity" | "widgetDisplayId" | "alerts">>) => window.metria.setWidgetPreferences(preferences),
+    onSuccess: (next) => { queryClient.setQueryData(["settings"], next); void queryClient.invalidateQueries({ queryKey: ["usage"] }); }
+  });
+  const setWindowVisible = useMutation({
+    mutationFn: (value: { kind: ProviderKind; title: string; visible: boolean }) => window.metria.setWindowVisible(value.kind, value.title, value.visible),
+    onSuccess: (next) => queryClient.setQueryData(["settings"], next)
+  });
+  const diagnose = useMutation({ mutationFn: (kind: ProviderKind) => window.metria.diagnose(kind), onSuccess: (message) => setNotice(message) });
   const providerSources = useProviderSources();
   const setProviderSource = useMutation({
     mutationFn: (variables: { kind: ProviderKind; source: ProviderSourceChoice }) => window.metria.setProviderSource(variables.kind, variables.source),
@@ -186,6 +209,22 @@ function SettingsModal({ onClose }: { onClose: () => void }): JSX.Element {
         </section>
 
         <section className="mt-6">
+          <h3 className="m-0 text-sm font-semibold uppercase tracking-wider text-dim">Display</h3>
+          <div className="mt-3 grid gap-3">
+            <label className="flex items-center justify-between gap-4 text-dim">Show usage widget <input type="checkbox" checked={settingsData?.showWidget ?? true} onChange={(event) => setPreferences.mutate({ showWidget: event.target.checked })} /></label>
+            <label className="flex items-center justify-between gap-4 text-dim">Show in system tray <input type="checkbox" checked={settingsData?.showTray ?? true} onChange={(event) => setPreferences.mutate({ showTray: event.target.checked })} /></label>
+            <label className="flex items-center justify-between gap-4 text-dim">Show provider account <input type="checkbox" checked={settingsData?.showAccountLabels ?? true} onChange={(event) => setPreferences.mutate({ showAccountLabels: event.target.checked })} /></label>
+          </div>
+          <div className="mt-4 grid grid-cols-2 gap-3">
+            <label className="grid gap-1 text-dim">Behavior<select className="border border-line2 bg-surface px-2.5 py-1.5 text-fg" value={settingsData?.widgetBehavior ?? "pinned"} onChange={(event) => setPreferences.mutate({ widgetBehavior: event.target.value as AppSettings["widgetBehavior"] })}><option value="pinned">Pinned</option><option value="auto-hide">Auto-hide</option></select></label>
+            <label className="grid gap-1 text-dim">Position<select className="border border-line2 bg-surface px-2.5 py-1.5 text-fg" value={settingsData?.widgetPosition ?? "right"} onChange={(event) => setPreferences.mutate({ widgetPosition: event.target.value as AppSettings["widgetPosition"] })}><option value="right">Right</option><option value="left">Left</option><option value="top">Top</option><option value="bottom">Bottom</option></select></label>
+            <label className="grid gap-1 text-dim">Size<select className="border border-line2 bg-surface px-2.5 py-1.5 text-fg" value={settingsData?.widgetSize ?? "medium"} onChange={(event) => setPreferences.mutate({ widgetSize: event.target.value as AppSettings["widgetSize"] })}><option value="small">Small</option><option value="medium">Medium</option><option value="large">Large</option></select></label>
+            <label className="grid gap-1 text-dim">Monitor<select className="border border-line2 bg-surface px-2.5 py-1.5 text-fg" value={settingsData?.widgetDisplayId ?? ""} onChange={(event) => setPreferences.mutate({ widgetDisplayId: event.target.value || null })}><option value="">Active display</option>{(displays.data ?? []).map((display) => <option key={display.id} value={display.id}>{display.label}</option>)}</select></label>
+          </div>
+          <label className="mt-4 grid gap-1 text-dim">Opacity: {Math.round((settingsData?.widgetOpacity ?? 1) * 100)}%<input type="range" min="35" max="100" value={Math.round((settingsData?.widgetOpacity ?? 1) * 100)} onChange={(event) => setPreferences.mutate({ widgetOpacity: Number(event.target.value) / 100 })} /></label>
+        </section>
+
+        <section className="mt-6">
           <h3 className="m-0 text-sm font-semibold uppercase tracking-wider text-dim">Refresh</h3>
           <div className="mt-2.5 flex items-center gap-2.5">
             <label className="text-dim" htmlFor="refresh-interval">Usage every</label>
@@ -196,6 +235,19 @@ function SettingsModal({ onClose }: { onClose: () => void }): JSX.Element {
             >
               {intervalOptions.map((seconds) => <option key={seconds} value={seconds}>{Math.round(seconds / 60)} min</option>)}
             </select>
+          </div>
+        </section>
+
+        <section className="mt-6">
+          <h3 className="m-0 text-sm font-semibold uppercase tracking-wider text-dim">Usage alerts</h3>
+          <label className="mt-3 flex items-center justify-between gap-4 text-dim">Color usage alerts <input type="checkbox" checked={settingsData?.alerts.enabled ?? true} onChange={(event) => setPreferences.mutate({ alerts: { ...(settingsData?.alerts ?? { cautionThreshold: 40, warningThreshold: 65, criticalThreshold: 85, cautionColor: "#ffd60a", warningColor: "#ff9f0a", criticalColor: "#ff453a" }), enabled: event.target.checked } })} /></label>
+          <div className="mt-3 grid grid-cols-3 gap-3">
+            {(["caution", "warning", "critical"] as const).map((level) => {
+              const alerts = settingsData?.alerts ?? { enabled: true, cautionThreshold: 40, warningThreshold: 65, criticalThreshold: 85, cautionColor: "#ffd60a", warningColor: "#ff9f0a", criticalColor: "#ff453a" };
+              const thresholdKey = `${level}Threshold` as "cautionThreshold" | "warningThreshold" | "criticalThreshold";
+              const colorKey = `${level}Color` as "cautionColor" | "warningColor" | "criticalColor";
+              return <label key={level} className="grid gap-1 text-xs capitalize text-dim">{level}<input type="number" min="1" max="100" value={alerts?.[thresholdKey] ?? 0} onChange={(event) => setPreferences.mutate({ alerts: { ...(alerts!), [thresholdKey]: Number(event.target.value) } })} /><input type="color" value={alerts?.[colorKey] ?? "#ffffff"} onChange={(event) => setPreferences.mutate({ alerts: { ...(alerts!), [colorKey]: event.target.value } })} /></label>;
+            })}
           </div>
         </section>
 
@@ -219,6 +271,22 @@ function SettingsModal({ onClose }: { onClose: () => void }): JSX.Element {
             ))}
           </section>
         )}
+
+        <section className="mt-6">
+          <h3 className="m-0 text-sm font-semibold uppercase tracking-wider text-dim">Providers</h3>
+          {usageData.map((provider) => {
+            const enabled = settingsData?.enabledProviders.includes(provider.kind) ?? true;
+            const hidden = settingsData?.hiddenUsageWindowTitles[provider.kind] ?? [];
+            return <article key={provider.kind} className="mt-3 border-t border-line pt-3">
+              <div className="flex items-center justify-between gap-3"><strong>{provider.kind}</strong><label className="flex items-center gap-2 text-dim"><input type="checkbox" checked={enabled} onChange={(event) => void window.metria.setProviderEnabled(provider.kind, event.target.checked).then((next) => queryClient.setQueryData(["settings"], next))} /> Use this provider</label></div>
+              <div className="mt-2 grid gap-2">{WINDOW_TITLES[provider.kind].map((title) => <label key={title} className="flex items-center gap-2 text-sm text-dim"><input type="checkbox" checked={!hidden.includes(title)} onChange={(event) => setWindowVisible.mutate({ kind: provider.kind, title, visible: event.target.checked })} /> Show {title}</label>)}</div>
+              <div className="mt-3 flex flex-wrap gap-2"><button type="button" className="border border-line2 bg-transparent px-3 py-1.5 text-fg" onClick={() => void diagnose.mutate(provider.kind)}>Diagnose</button><button type="button" className="border border-line2 bg-transparent px-3 py-1.5 text-fg" onClick={() => void window.metria.reconnect(provider.kind).then((result) => setNotice(result.message))}>Reconnect</button></div>
+              {provider.error && <p className="mt-2 text-accent">{provider.error}</p>}
+              <p className="mt-2 text-xs text-dim">{provider.updatedAt ? `Last update: ${new Date(provider.updatedAt).toLocaleString()}` : provider.setupHint}</p>
+            </article>;
+          })}
+          <p className="mt-3 text-xs text-dim">Keep at least one provider enabled and one usage window visible per provider.</p>
+        </section>
 
         <section className="mt-6">
           <h3 className="m-0 text-sm font-semibold uppercase tracking-wider text-dim">Updates</h3>
@@ -312,7 +380,7 @@ function Dashboard(): JSX.Element {
       <p className="mb-[30px] mt-[18px] text-dim" role="status">{status}</p>
       <section aria-live="polite">
         {(usage.data ?? []).map((provider) => (
-          <ProviderCard key={provider.kind} provider={provider} enabled={settings.data?.enabledProviders.includes(provider.kind) ?? true} onStatus={setStatus} />
+          <ProviderCard key={provider.kind} provider={provider} enabled={settings.data?.enabledProviders.includes(provider.kind) ?? true} showAccount={settings.data?.showAccountLabels ?? true} hiddenWindows={settings.data?.hiddenUsageWindowTitles[provider.kind] ?? []} alerts={settings.data?.alerts} onStatus={setStatus} />
         ))}
       </section>
       {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}

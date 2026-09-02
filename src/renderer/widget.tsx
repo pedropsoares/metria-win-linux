@@ -1,4 +1,4 @@
-import { useEffect, useRef, type JSX } from "react";
+import { useEffect, useRef, useState, type JSX } from "react";
 import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { clampPercent, DEFAULT_WIDGET_Y_OFFSET, PROVIDER_LOGOS, WIDGET_ITEM_HEIGHT } from "../shared/types";
@@ -15,11 +15,11 @@ const ACCENT: Record<ProviderKind, string> = {
 
 function primary(provider: ProviderUsage): number { return provider.windows[0]?.percent ?? 0; }
 
-function Ring({ provider }: { provider: ProviderUsage }): JSX.Element {
+function Ring({ provider, alert }: { provider: ProviderUsage; alert: { enabled: boolean; cautionThreshold: number; warningThreshold: number; criticalThreshold: number; cautionColor: string; warningColor: string; criticalColor: string } }): JSX.Element {
   const clamped = clampPercent(primary(provider));
   const r = 17;
   const c = 2 * Math.PI * r;
-  const stroke = provider.kind === "Codex" ? "url(#codex-ring)" : ACCENT[provider.kind];
+  const stroke = alert.enabled && clamped >= alert.criticalThreshold ? alert.criticalColor : alert.enabled && clamped >= alert.warningThreshold ? alert.warningColor : alert.enabled && clamped >= alert.cautionThreshold ? alert.cautionColor : provider.kind === "Codex" ? "url(#codex-ring)" : ACCENT[provider.kind];
   return (
     <span className="relative block h-[38px] w-[38px]">
       <svg className="absolute inset-0" width="38" height="38" viewBox="0 0 38 38">
@@ -54,16 +54,22 @@ function Widget(): JSX.Element {
     window.metria.onSettingsChanged(() => { void queryClient.invalidateQueries(); });
   }, []);
   const settings = useQuery({ queryKey: ["settings"], queryFn: () => window.metria.getSettings() });
+  const [hovered, setHovered] = useState(false);
+  const position = settings.data?.widgetPosition ?? "right";
+  const vertical = position === "left" || position === "right";
+  const autoHide = settings.data?.widgetBehavior === "auto-hide";
+  const size = settings.data?.widgetSize ?? "medium";
   const usage = useQuery({
     queryKey: ["usage"],
     queryFn: () => window.metria.getUsage(),
     refetchInterval: settings.data ? settings.data.refreshIntervalSeconds * 1000 : undefined
   });
-  const drag = useRef<{ startScreenY: number; startOffset: number } | null>(null);
+  const drag = useRef<{ startScreen: number; startOffset: number } | null>(null);
   const moved = useRef(false);
   const offsetRef = useRef(DEFAULT_WIDGET_Y_OFFSET);
   const pendingTarget = useRef<number | null>(null);
   const frameScheduled = useRef(false);
+  useEffect(() => { if (settings.data) offsetRef.current = settings.data.widgetAlongEdgeOffset || settings.data.widgetYOffset; }, [settings.data]);
   const scheduleMove = (target: number): void => {
     pendingTarget.current = target;
     if (frameScheduled.current) return;
@@ -84,13 +90,13 @@ function Widget(): JSX.Element {
     // Use screenY, not clientY: the widget window moves while dragging, so
     // viewport-relative coordinates shift on their own and make the drag
     // oscillate (ghost effect). screenY is global and stays stable.
-    drag.current = { startScreenY: event.screenY, startOffset: offsetRef.current };
+    drag.current = { startScreen: vertical ? event.screenY : event.screenX, startOffset: offsetRef.current };
     event.currentTarget.setPointerCapture(event.pointerId);
   };
   const onPointerMove = (event: React.PointerEvent<HTMLElement>): void => {
     const dragState = drag.current;
     if (!dragState) return;
-    const delta = Math.round(event.screenY - dragState.startScreenY);
+    const delta = Math.round((vertical ? event.screenY : event.screenX) - dragState.startScreen);
     if (Math.abs(delta) > DRAG_THRESHOLD) {
       if (!moved.current) void window.metria.setProviderHover(null);
       moved.current = true;
@@ -109,18 +115,19 @@ function Widget(): JSX.Element {
     }
   };
   return (
-    <main className="flex h-full w-full cursor-grab select-none flex-col overflow-hidden py-3 active:cursor-grabbing" onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp}>
-      <section className="flex min-h-0 flex-1 flex-col items-center gap-2">
+    <main className={`flex h-full w-full select-none overflow-hidden border border-white/10 bg-black/90 transition-opacity duration-200 ${vertical ? "flex-col py-3" : "flex-row px-3"} cursor-grab active:cursor-grabbing`} style={{ opacity: (settings.data?.widgetOpacity ?? 1) * (autoHide && !hovered ? 0.55 : 1), borderRadius: position === "right" ? "18px 0 0 18px" : position === "left" ? "0 18px 18px 0" : position === "top" ? "0 0 18px 18px" : "18px 18px 0 0" }} onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp}>
+      {hovered && <button type="button" aria-label={autoHide ? "Pin widget" : "Auto-hide widget"} className="absolute z-10 rounded-full border border-line2 bg-surface px-1.5 py-1 text-xs text-dim" onPointerDown={(event) => event.stopPropagation()} onClick={() => void window.metria.setWidgetPreferences({ widgetBehavior: autoHide ? "pinned" : "auto-hide" })}>{autoHide ? "Pin" : "Hide"}</button>}
+      <section className={`flex min-h-0 min-w-0 flex-1 items-center gap-2 ${vertical ? "flex-col" : "flex-row"}`}>
         {visible.map((provider, index) => (
           <div
             key={provider.kind}
             data-index={index}
-            className="flex w-16 shrink-0 cursor-pointer flex-col items-center justify-center gap-[3px]"
-            style={{ height: WIDGET_ITEM_HEIGHT }}
+            className={`flex shrink-0 cursor-pointer items-center justify-center gap-[3px] ${vertical ? "w-16 flex-col" : "h-16 flex-col"} ${size === "small" ? "scale-90" : size === "large" ? "scale-110" : ""}`}
+            style={{ width: vertical ? 64 : WIDGET_ITEM_HEIGHT, height: vertical ? WIDGET_ITEM_HEIGHT : 64 }}
             onClick={() => { if (!moved.current) void window.metria.openDashboard(); }}
             onMouseEnter={() => { void window.metria.setProviderHover(index); }}
           >
-            <Ring provider={provider} />
+            <Ring provider={provider} alert={settings.data?.alerts ?? { enabled: true, cautionThreshold: 40, warningThreshold: 65, criticalThreshold: 85, cautionColor: "#ffd60a", warningColor: "#ff9f0a", criticalColor: "#ff453a" }} />
             <span className="text-[11px] font-semibold leading-none text-white">
               {Math.round(clampPercent(primary(provider)))}%
             </span>
