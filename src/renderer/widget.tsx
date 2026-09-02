@@ -85,7 +85,9 @@ function Widget(): JSX.Element {
     });
   };
   const visible = (usage.data ?? []).filter((provider) => settings.data?.enabledProviders.includes(provider.kind) && provider.available);
-  const displayed = autoHide && !hovered ? [] : visible;
+  // Keep provider items mounted while auto-hide is active so the rail remains
+  // discoverable and can recover even when a window manager misses hover events.
+  const displayed = visible;
   const onPointerDown = (event: React.PointerEvent<HTMLElement>): void => {
     moved.current = false;
     // Use screenY, not clientY: the widget window moves while dragging, so

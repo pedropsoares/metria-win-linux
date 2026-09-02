@@ -406,6 +406,7 @@ if (hasSingleInstanceLock) app.whenReady().then(() => {
     widgetWindow.setBounds(widgetBounds(displayArea(), 0));
     widgetWindow.showInactive();
   }
+  void usage();
   ipcMain.handle("metria:get-usage", (event) => { requireTrustedSender(event); return usage(); });
   ipcMain.handle("metria:open-dashboard", (event) => { requireTrustedSender(event); showDashboard(); });
   ipcMain.handle("metria:provider-hover", (event, index: unknown) => {
