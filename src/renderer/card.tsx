@@ -34,14 +34,14 @@ function WindowRow({ window: row, alerts }: { window: UsageWindow; alerts?: AppS
   const color = alerts?.enabled && percent >= alerts.criticalThreshold ? alerts.criticalColor : alerts?.enabled && percent >= alerts.warningThreshold ? alerts.warningColor : alerts?.enabled && percent >= alerts.cautionThreshold ? alerts.cautionColor : gaugeColor(percent);
   return (
     <div className="mt-[18px] first:mt-0">
-      <div className="flex items-baseline justify-between gap-3 text-[15px] leading-[1.2]">
+      <div className="flex items-baseline justify-between gap-3 text-[13px] leading-[1.2]">
         <span>{row.title}</span>
         <span className="whitespace-nowrap text-xs text-mute">{resetText(row.resetDate)}</span>
       </div>
       <div className="my-2 h-[7px] overflow-hidden rounded-[99px] bg-[#2c2c2c]">
        <i className="block h-full rounded-[99px]" style={{ background: color, width: `${percent}%` }} />
       </div>
-      <div className="mt-2 text-[15px] font-semibold leading-none text-[#e8e8e8]">{Math.round(percent)}% Used</div>
+      <div className="mt-2 text-[13px] font-semibold leading-none text-[#e8e8e8]">{Math.round(percent)}% Used</div>
     </div>
   );
 }
@@ -97,11 +97,11 @@ function Card(): JSX.Element {
   );
 
   return (
-    <main className="relative flex h-fit select-none flex-col bg-surface px-6 py-7" style={{ minWidth: CARD_WIDTH }}>
-      <h2 className="m-0 flex items-center gap-2.5 p-0 mb-5 text-[22px] font-medium leading-none">
+     <main className="relative flex h-fit select-none flex-col rounded-[18px] bg-surface px-5 py-5" style={{ minWidth: CARD_WIDTH }}>
+       <h2 className="m-0 flex items-center gap-2.5 p-0 mb-4 text-[18px] font-medium leading-none">
         {provider && (
           <>
-            <img className="h-[22px] w-[22px] shrink-0 object-contain" src={`./${PROVIDER_LOGOS[provider.kind]}`} alt="" />
+             <img className="h-[19px] w-[19px] shrink-0 object-contain" src={`./${PROVIDER_LOGOS[provider.kind]}`} alt="" />
             <span>{providerShortLabel(provider.kind)}</span>
             {settings.data?.showAccountLabels && provider.accountLabel && <span className="text-xs text-mute">{provider.accountLabel}</span>}
             <span className="h-[7px] w-[7px] shrink-0 rounded-full" style={{ background: statusDotColor(provider.error !== null) }} />

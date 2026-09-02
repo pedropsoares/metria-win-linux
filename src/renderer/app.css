@@ -8,6 +8,14 @@
   --color-dim: #8e8e93;
   --color-mute: #9a9a9e;
   --color-accent: #ff8d6c;
-  --font-rounded: ui-rounded, "SF Pro Rounded", system-ui, sans-serif;
+  --font-rounded: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+html, body, #root {
+  box-shadow: none;
+}
+
+body {
+  font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }

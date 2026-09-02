@@ -95,15 +95,17 @@ function createWidgetWindow(): BrowserWindow {
   });
   widget.loadFile(join(__dirname, "../renderer/widget.html"));
   // Same re-assert on mapping as the card: compositors may override pre-show bounds.
-  widget.on("show", () => { widget.setAlwaysOnTop(true, "floating"); updateWidgetBounds(lastUsage); });
+  widget.on("show", () => { widget.setAlwaysOnTop(true, "floating"); widget.moveTop(); updateWidgetBounds(lastUsage); });
+  widget.on("blur", () => { widget.setAlwaysOnTop(true, "floating"); widget.moveTop(); });
   widget.on("closed", () => { widgetWindow = undefined; hideCard(); });
   widget.setAlwaysOnTop(true, "floating");
+  widget.setHasShadow(false);
   return widget;
 }
 function updateWidgetBounds(values: typeof lastUsage): void {
   if (!widgetWindow) return;
   const enabled = settings.load().enabledProviders;
-  const count = values.filter((provider) => enabled.includes(provider.kind) && provider.available).length;
+  const count = values.filter((provider) => enabled.includes(provider.kind)).length;
     widgetWindow.setBounds(widgetBounds(displayArea(), count));
   if (cardActiveIndex !== null) positionCard(cardActiveIndex);
 }
@@ -113,7 +115,7 @@ const CARD_SPACING = 12;
 
 function visibleProviders(): typeof lastUsage {
   const enabled = settings.load().enabledProviders;
-  return lastUsage.filter((provider) => enabled.includes(provider.kind) && provider.available);
+  return lastUsage.filter((provider) => enabled.includes(provider.kind));
 }
 
 function createCardWindow(): BrowserWindow {
@@ -298,11 +300,17 @@ function showWidgetMenu(): void {
   Menu.buildFromTemplate([
     { label: "Open dashboard", click: showDashboard },
     { label: "Refresh", click: () => { void usage(); } },
-    { type: "separator" },
     { label: "Settings", click: showDashboardSettings },
-    { type: "separator" },
-    { label: "Quit Metria", click: () => { isQuitting = true; app.quit(); } }
+    { label: "Quit", click: quitApp }
   ]).popup({ window: widgetWindow });
+}
+
+function quitApp(): void {
+  isQuitting = true;
+  window?.destroy();
+  widgetWindow?.destroy();
+  cardWindow?.destroy();
+  app.quit();
 }
 
 function createTray(): void {
@@ -428,14 +436,14 @@ if (process.platform === "linux") {
 }
 if (hasSingleInstanceLock) app.whenReady().then(() => {
   lastUsage = loadCachedUsage();
-  if (settings.load().showTray) createTray(); showDashboard(); initAutoUpdater();
+  if (settings.load().showTray) createTray(); initAutoUpdater();
   if (supportsWidget() && settings.load().showWidget) {
     widgetWindow = createWidgetWindow();
     widgetWindow.setBounds(widgetBounds(displayArea(), 0));
     widgetWindow.showInactive();
   }
   void usage();
-  ipcMain.handle("metria:get-usage", (event) => { requireTrustedSender(event); return usage(); });
+  ipcMain.handle("metria:get-usage", (event) => { requireTrustedSender(event); return lastUsage.length ? lastUsage : usage(); });
   ipcMain.handle("metria:open-dashboard", (event) => { requireTrustedSender(event); showDashboard(); });
   ipcMain.handle("metria:widget-context-menu", (event) => { requireTrustedSender(event); showWidgetMenu(); });
   ipcMain.handle("metria:provider-hover", (event, index: unknown) => {
@@ -544,7 +552,7 @@ if (hasSingleInstanceLock) app.whenReady().then(() => {
     }
     return { opened: false, message: "Uninstall is only available on Windows and Linux." };
   });
-  ipcMain.handle("metria:quit", (event) => { requireTrustedSender(event); isQuitting = true; app.quit(); });
+  ipcMain.handle("metria:quit", (event) => { requireTrustedSender(event); quitApp(); });
   ipcMain.handle("metria:set-launch-at-login", (event, enabled: unknown) => {
     requireTrustedSender(event);
     if (typeof enabled !== "boolean") throw new Error("Invalid launch-at-login setting.");

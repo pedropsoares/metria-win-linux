@@ -85,7 +85,7 @@ function Widget(): JSX.Element {
       void window.metria.setWidgetYOffset(value).then((settings) => { offsetRef.current = settings.widgetYOffset; });
     });
   };
-  const visible = (usage.data ?? []).filter((provider) => settings.data?.enabledProviders.includes(provider.kind) && provider.available);
+  const visible = (usage.data ?? []).filter((provider) => settings.data?.enabledProviders.includes(provider.kind));
   // Keep provider items mounted while auto-hide is active so the rail remains
   // discoverable and can recover even when a window manager misses hover events.
   const displayed = visible;
@@ -119,9 +119,9 @@ function Widget(): JSX.Element {
     }
   };
   return (
-    <main className={`relative flex h-full w-full select-none overflow-hidden border border-white/10 bg-black/90 transition-opacity duration-200 ${vertical ? "flex-col py-3" : "flex-row px-3"} cursor-grab active:cursor-grabbing`} style={{ opacity: (settings.data?.widgetOpacity ?? 1) * (autoHide && !hovered ? 0.55 : 1), borderRadius: position === "right" ? "18px 0 0 18px" : position === "left" ? "0 18px 18px 0" : position === "top" ? "0 0 18px 18px" : "18px 18px 0 0" }} onContextMenu={(event) => { event.preventDefault(); void window.metria.openWidgetMenu(); }} onMouseEnter={() => setHovered(true)} onMouseMove={() => setHovered(true)} onMouseLeave={() => setHovered(false)} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp}>
+    <main className={`relative flex h-full w-full select-none overflow-hidden border border-white/10 bg-black/90 shadow-none transition-opacity duration-200 ${vertical ? "flex-col py-3" : "flex-row px-3"} cursor-grab active:cursor-grabbing`} style={{ opacity: (settings.data?.widgetOpacity ?? 1) * (autoHide && !hovered ? 0.55 : 1), boxShadow: "none", borderRadius: position === "right" ? "18px 0 0 18px" : position === "left" ? "0 18px 18px 0" : position === "top" ? "0 0 18px 18px" : "18px 18px 0 0" }} onContextMenu={(event) => { event.preventDefault(); void window.metria.openWidgetMenu(); }} onMouseEnter={() => setHovered(true)} onMouseMove={() => setHovered(true)} onMouseLeave={() => setHovered(false)} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp}>
       {autoHide && !hovered && <span className="absolute inset-0 flex items-center justify-center text-xs text-mute" aria-label="Hover to open widget">{position === "right" ? "<" : position === "left" ? ">" : position === "top" ? "v" : "^"}</span>}
-      <section className={`flex min-h-0 min-w-0 flex-1 items-center gap-2 ${vertical ? "flex-col" : "flex-row"}`}>
+      <section className={`flex min-h-0 min-w-0 flex-1 items-center justify-center gap-2 ${vertical ? "flex-col" : "flex-row"}`}>
         {displayed.map((provider, index) => (
           <div
             key={provider.kind}
