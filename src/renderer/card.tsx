@@ -97,13 +97,13 @@ function Card(): JSX.Element {
   );
 
   return (
-     <main className="relative flex h-fit select-none flex-col rounded-[18px] bg-surface px-5 py-5" style={{ minWidth: CARD_WIDTH }}>
+     <main className="relative flex h-fit select-none flex-col rounded-[18px] bg-surface px-5 py-5 transition-colors duration-200 hover:bg-black" style={{ minWidth: CARD_WIDTH }}>
        <h2 className="m-0 flex items-center gap-2.5 p-0 mb-4 text-[18px] font-medium leading-none">
         {provider && (
           <>
              <img className="h-[19px] w-[19px] shrink-0 object-contain" src={`./${PROVIDER_LOGOS[provider.kind]}`} alt="" />
             <span>{providerShortLabel(provider.kind)}</span>
-            {settings.data?.showAccountLabels && provider.accountLabel && <span className="text-xs text-mute">{provider.accountLabel}</span>}
+            {settings.data?.showAccountLabels && provider.accountLabel && <span className="min-w-0 truncate text-xs text-mute">{provider.accountLabel}</span>}
             <span className="h-[7px] w-[7px] shrink-0 rounded-full" style={{ background: statusDotColor(provider.error !== null) }} />
           </>
         )}
