@@ -1,8 +1,8 @@
 import { useEffect, useState, type JSX } from "react";
 import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
-import { CARD_WIDTH, clampPercent, gaugeColor, PROVIDER_LOGOS, providerShortLabel, statusDotColor } from "../shared/types";
-import type { AppSettings, CardShowPayload, ProviderUsage, UsageWindow } from "../shared/types";
+import { CARD_WIDTH, clampPercent, DEFAULT_SPEND_DISPLAY, gaugeColor, PROVIDER_LOGOS, providerShortLabel, statusDotColor, usageParts } from "../shared/types";
+import type { AppSettings, CardShowPayload, ProviderUsage, SpendDisplay, UsageWindow } from "../shared/types";
 import "./app.css";
 
 const queryClient = new QueryClient({ defaultOptions: { queries: { refetchOnWindowFocus: false } } });
@@ -29,9 +29,10 @@ function resetText(resetDate: string | null): string {
   return `Resets ${new Date(resetDate).toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`;
 }
 
-function WindowRow({ window: row, alerts }: { window: UsageWindow; alerts?: AppSettings["alerts"] }): JSX.Element {
+function WindowRow({ window: row, alerts, display }: { window: UsageWindow; alerts?: AppSettings["alerts"]; display: SpendDisplay }): JSX.Element {
   const percent = clampPercent(row.percent);
   const color = alerts?.enabled && percent >= alerts.criticalThreshold ? alerts.criticalColor : alerts?.enabled && percent >= alerts.warningThreshold ? alerts.warningColor : alerts?.enabled && percent >= alerts.cautionThreshold ? alerts.cautionColor : gaugeColor(percent);
+  const parts = usageParts(row, display);
   return (
     <div className="mt-[18px] first:mt-0">
       <div className="flex items-baseline justify-between gap-3 text-[13px] leading-[1.2]">
@@ -41,7 +42,10 @@ function WindowRow({ window: row, alerts }: { window: UsageWindow; alerts?: AppS
       <div className="my-2 h-[7px] overflow-hidden rounded-[99px] bg-[#2c2c2c]">
        <i className="block h-full rounded-[99px]" style={{ background: color, width: `${percent}%` }} />
       </div>
-      <div className="mt-2 text-[13px] font-semibold leading-none text-[#e8e8e8]">{Math.round(percent)}% Used</div>
+      <div className="mt-2 flex items-baseline justify-between gap-3 text-[13px] font-semibold leading-none text-[#e8e8e8]">
+        {parts.percent && <span>{Math.round(percent)}% Used</span>}
+        {parts.spend && <span className="whitespace-nowrap font-mono">{parts.spend}</span>}
+      </div>
     </div>
   );
 }
@@ -53,19 +57,21 @@ function Card(): JSX.Element {
     queryFn: () => window.metria.getUsage(),
     refetchOnWindowFocus: false
   });
-  const settings = useQuery({ queryKey: ["settings"], queryFn: () => window.metria.getSettings() });
+  const settings = useQuery({ queryKey: ["settings"], queryFn: () => window.metria.getSettings(), refetchOnWindowFocus: false });
   useEffect(() => {
     window.metria.onSettingsChanged(() => { void queryClient.invalidateQueries({ queryKey: ["settings"] }); });
     window.metria.onUsageChanged(() => { void queryClient.invalidateQueries({ queryKey: ["usage"] }); });
   }, []);
   const provider = usage.data?.find((candidate) => candidate.kind === payload?.kind);
   const visibleWindows = provider?.windows.filter((row) => !settings.data?.hiddenUsageWindowTitles[provider.kind]?.includes(row.title)) ?? [];
+  const display = settings.data?.spendDisplay ?? DEFAULT_SPEND_DISPLAY;
 
   useEffect(() => {
     const apply = (next: CardShowPayload | null): void => setPayload(next);
     // Never re-send a hover from inside the card: it cancels the pending hide and
     // keeps the card open when the pointer merely crosses it while leaving the widget.
     const leave = (): void => { void window.metria.setProviderHover(null); };
+    window.metria.onSettingsChanged(() => { void queryClient.invalidateQueries(); });
     showListeners.add(apply);
     document.body.addEventListener("mouseleave", leave);
     return () => {
@@ -77,7 +83,7 @@ function Card(): JSX.Element {
   useEffect(() => {
     if (!payload) return;
     requestAnimationFrame(() => { void window.metria.resizeCard(Math.ceil(document.body.scrollHeight)); });
-  }, [payload, provider, usage.data]);
+  }, [payload, provider, usage.data, display]);
 
   const content = provider ? (
     provider.windows.length === 0 ? (
@@ -90,7 +96,7 @@ function Card(): JSX.Element {
     ) : visibleWindows.length === 0 ? (
       <div className="text-[13px] leading-[1.4] text-mute">All usage windows are hidden. Enable one in Settings.</div>
     ) : (
-      visibleWindows.map((row) => <WindowRow key={row.title} window={row} alerts={settings.data?.alerts} />)
+      visibleWindows.map((row) => <WindowRow key={row.title} window={row} alerts={settings.data?.alerts} display={display} />)
     )
   ) : (
     <div className="flex items-center gap-2 text-[13px] leading-[1.4] text-mute">Waiting for usage data...</div>
