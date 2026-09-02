@@ -1,81 +1,136 @@
 # Metria Win/Linux
 
-This is the Windows/Linux desktop implementation of Metria, built with Electron.
-It does the same job as the native macOS application, but it is a separate app
-and does not replace or import the native SwiftUI/AppKit code. macOS is served
-exclusively by the native app, so this project ships Windows/Linux installers
-only.
+*A Windows and Linux desktop app that tracks your AI coding assistant usage in real time.*
 
-Releases: https://github.com/yurirxmos/metria-win-linux/releases
+<p align="center">
+  <img src="https://i.imgur.com/shpAcSm.gif" alt="Metria demo" width="720" />
+</p>
 
-## Development
+<p align="center">
+  <a href="https://github.com/yurirxmos/metria-win-linux/stargazers"><img src="https://img.shields.io/github/stars/yurirxmos/metria-win-linux?style=flat-square" alt="Stars" /></a>
+  <a href="https://github.com/yurirxmos/metria-win-linux/releases"><img src="https://img.shields.io/github/v/tag/yurirxmos/metria-win-linux?label=version&style=flat-square" alt="Version" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg?style=flat-square" alt="License" /></a>
+  <a href="https://github.com/yurirxmos/metria-win-linux/commits"><img src="https://img.shields.io/github/commit-activity/m/yurirxmos/metria-win-linux?style=flat-square" alt="Commits" /></a>
+</p>
+
+## Contents
+
+- [What it does](#what-it-does)
+- [Download](#download)
+- [To do](#to-do)
+- [Providers](#providers)
+- [Requirements](#requirements)
+- [Quick start](#quick-start)
+- [Project layout](#project-layout)
+- [Contributing](#contributing)
+- [License](#license)
+
+## What it does
+
+Metria shows current session and monthly usage percentages for supported AI providers.
+
+- **Usage widget**: a right-edge widget for provider usage cards.
+- **System tray**: compact access to provider usage and controls.
+- **Dashboard window**: detailed per-provider cards and usage gauges.
+
+The app stores its settings in its own `com.metria.electron` application-data namespace.
+
+## Download
+
+Download the installer for your operating system from the [GitHub Releases](https://github.com/yurirxmos/metria-win-linux/releases) page.
+
+- **Windows**: `.exe` installer.
+- **Linux**: `.AppImage` package.
+
+Electron releases are unsigned. Windows SmartScreen may display a warning during installation.
+
+## To do
+
+- Improve Metria compatibility and runtime support for Windows and Linux.
+- Add usage-aware sounds and animations.
+
+## Providers
+
+Providers are enabled automatically when their local credentials or usage files are detected. Providers that are not installed remain available in Settings with setup guidance.
+
+- **Claude**: credentials read from `~/.claude/.credentials.json` on Unix and from the equivalent host or WSL location on Windows.
+- **Codex**: credentials and the newest session read from `CODEX_HOME`/`~/.codex`, including WSL locations on Windows.
+- **OpenCode Go**: credentials read from `XDG_DATA_HOME`/`~/.local/share/opencode/auth.json` on Unix, `%APPDATA%` on Windows, or the WSL path.
+
+Providers are discovered on the host filesystem and, on Windows, in installed WSL distributions. These read-only locations are fixture-tested, not runtime-tested on every supported platform.
+
+Credentials are never committed. Metria reads them at runtime from the documented local sources.
+
+## Mobile PWA
+
+This version does not include phone pairing, the local PWA server, QR pairing, or mobile alerts. Those features belong to the native macOS application.
+
+## Requirements
+
+- Windows or Linux for the supported desktop application.
+- Node.js 22+ and npm for building from source.
+- Windows and Linux builds must be created and runtime-tested on their respective platforms.
+
+## Quick start
+
+Download the latest installer from [GitHub Releases](https://github.com/yurirxmos/metria-win-linux/releases), or build it on Windows or Linux:
 
 ```sh
 npm ci
-npm run check
-npm run dev
 npm run package
 ```
 
-`npm run package` creates host-native Electron artifacts in `release/`; it does
-not publish them. macOS packaging is not configured. Use the native Metria
-repository for the macOS app.
+The host-native installer is created in `release/`.
 
-## Architecture and security
+### Run in development
 
-- `src/main/` owns provider files, network calls, settings, tray, and IPC.
-- `src/preload/` exposes only the typed `window.metria` methods.
-- `src/renderer/` is sandboxed; it has no Node or Electron imports. The
-  dashboard, usage widget, and hover card are React apps using TanStack Query
-  and Tailwind v4, bundled by Vite into `dist/renderer/`.
-- Browser windows use `contextIsolation: true`, `sandbox: true`, and
-  `nodeIntegration: false`; every IPC method validates its sender and arguments.
+```sh
+npm ci
+npm run dev
+```
 
-Electron stores its settings in its own `com.metria.electron` application-data
-namespace. It must not modify native Metria's UserDefaults, Keychain services,
-Sparkle feed, or app bundle.
+Run the checks with:
 
-Phone pairing and phone sync (the hosted-PWA feature) are not included in the
-Electron implementation. It does not run a loopback PWA server, generate pairing
-links, or post encrypted snapshots to `ntfy.sh`.
+```sh
+npm run check
+```
 
-## Parity and platform support
-
-| Capability | Native macOS | Metria Electron |
-| --- | --- | --- |
-| Dashboard, tray, provider controls | Yes | Yes |
-| Side notch | Yes | Usage widget window (Windows/Linux) |
-| Hosted-PWA QR pairing | Yes | No |
-| Launch at login | macOS service | Windows login item, XDG desktop-autostart entry |
-| Auto-update | Sparkle, signed appcast | Yes, silent via GitHub Releases |
-| Provider data from WSL | No | Yes: providers stored in WSL distros are discovered and selectable per provider |
-
-## Provider data sources
-
-Providers are discovered in the host filesystem and in every installed WSL
-distro (Windows only). When the same provider has data in both places, the
-dashboard asks which to track once, then remembers the choice in settings:
-
-- Claude reads `~/.claude/.credentials.json` on the host and in WSL and calls
-  the Anthropic usage endpoint with the stored access token.
-- Codex reads `CODEX_HOME`/`~/.codex` (auth plus newest session) or the same
-  files inside WSL.
-- OpenCode Go reads `XDG_DATA_HOME`/`~/.local/share/opencode/auth.json` on Unix,
-  `%APPDATA%` on Windows, or the WSL path.
-
-These read-only locations are fixture-tested, not runtime-tested on
-Windows/Linux.
-
-Windows and Linux packages must be created and runtime-tested on those systems;
-they are not claimed as verified from macOS.
-
-## Releases
-
-Push an `electron-v*` tag to package and publish Windows and Linux artifacts:
+Push an `electron-v*` tag to package and publish a release:
 
 ```sh
 git tag electron-v0.2.0
 git push origin electron-v0.2.0
 ```
 
-The updater uses the `electron-latest` release channel in this repository.
+The updater uses the dedicated `electron-latest` channel in this repository.
+
+## Project layout
+
+- `src/main/`: provider files, network calls, settings, tray, windows, and IPC.
+- `src/preload/`: the typed `window.metria` context bridge.
+- `src/renderer/`: sandboxed React dashboard, widget, and usage card.
+- `src/shared/`: shared TypeScript types and provider presentation helpers.
+- `src/test/`: provider, path, and WSL fixture tests.
+- `resources/`: Electron icons and bundled provider assets.
+- `.github/workflows/electron-release.yml`: Windows/Linux release automation.
+
+## Architecture and security
+
+- Browser windows use `contextIsolation: true`, `sandbox: true`, and `nodeIntegration: false`.
+- The renderer has no Node or Electron imports.
+- The preload exposes only typed, allowlisted `window.metria` methods.
+- Every IPC method validates its sender and arguments.
+- The app uses local packaged content and does not share storage with the native macOS app.
+
+## Contributing
+
+Contributions are welcome. Open an issue to report a bug or suggest a feature, or open a pull request with a focused change.
+
+- Keep changes focused and follow the existing code style.
+- Keep all repository text in en-US.
+- Do not commit credentials, generated build output, or local configuration.
+- Create and runtime-test Windows and Linux packages on their respective platforms.
+
+## License
+
+Metria is open source under MIT; see [LICENSE](LICENSE).
