@@ -56,6 +56,7 @@ Providers are enabled automatically when their local credentials or usage files 
 - **Claude**: credentials read from `~/.claude/.credentials.json` on Unix and from the equivalent host or WSL location on Windows.
 - **Codex**: credentials and the newest session read from `CODEX_HOME`/`~/.codex`, including WSL locations on Windows.
 - **OpenCode Go**: credentials read from `XDG_DATA_HOME`/`~/.local/share/opencode/auth.json` on Unix, `%APPDATA%` on Windows, or the WSL path.
+- **Cursor**: the JWT stored in `ItemTable` inside Cursor's `state.vscdb` — `%APPDATA%\Cursor\User\globalStorage` on Windows, `XDG_CONFIG_HOME`/`~/.config/Cursor/User/globalStorage` on Linux. Cursor is **host-only**: it is never read from a WSL distribution, so the source picker offers no WSL option for it. The database is read through Node's built-in `node:sqlite`, loaded lazily, so nothing SQLite-related is loaded for users without Cursor. The usage endpoint it calls is the one Cursor's own dashboard uses; it is not published by Cursor and can change without notice.
 
 Providers are discovered on the host filesystem and, on Windows, in installed WSL distributions. These read-only locations are fixture-tested, not runtime-tested on every supported platform.
 

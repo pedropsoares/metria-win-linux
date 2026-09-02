@@ -7,7 +7,7 @@ import "./app.css";
 
 const queryClient = new QueryClient({ defaultOptions: { queries: { refetchOnWindowFocus: false } } });
 const SOURCES_KEY = ["provider-sources"] as const;
-const WINDOW_TITLES: Record<ProviderKind, string[]> = { Claude: ["Current session", "All models"], Codex: ["Current session", "All models"], "OpenCode Go": ["Current session", "This week", "This month"] };
+const WINDOW_TITLES: Record<ProviderKind, string[]> = { Claude: ["Current session", "All models"], Codex: ["Current session", "All models"], "OpenCode Go": ["Current session", "This week", "This month"], Cursor: ["This cycle"] };
 
 function useProviderSources() {
   return useQuery({ queryKey: SOURCES_KEY, queryFn: () => window.metria.getProviderSources() });
