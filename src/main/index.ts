@@ -1,8 +1,9 @@
-import { app, BrowserWindow, clipboard, ipcMain, Menu, nativeImage, screen, shell, Tray } from "electron";
+import { app, BrowserWindow, clipboard, ipcMain, Menu, nativeImage, net, screen, shell, Tray } from "electron";
 import { autoUpdater } from "electron-updater";
 import { dirname, join } from "node:path";
 import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { ALL_PROVIDER_KINDS, CARD_WIDTH, isProviderKind, isSpendDisplay, PROVIDER_LOGOS, providerShortLabel, WIDGET_COLLAPSE_DELAY_MS, WIDGET_COLLAPSED_THICKNESS, WIDGET_CURSOR_POLL_MS, WIDGET_HOT_ZONE_GRAB, WIDGET_ITEM_HEIGHT, WIDGET_KEEP_OPEN_MARGIN, WIDGET_PEEK_EXTENT, WIDGET_REVEAL_DWELL_MS, WIDGET_SLIDE_MS } from "../shared/types";
+import { setHttpTransport } from "./http-transport";
 import { LocalPWAServer } from "./local-pwa-server";
 import { NtfyPublisher } from "./ntfy";
 import { PairingStore } from "./pairing";
@@ -636,6 +637,10 @@ if (process.platform === "linux") {
   app.disableHardwareAcceleration();
 }
 if (hasSingleInstanceLock) app.whenReady().then(() => {
+  // Installed before the first refresh, so every outbound call leaves through
+  // Chromium's network stack instead of Node's. See http-transport.ts. The cast
+  // is a typings gap: `net.fetch` does accept the binary body the ntfy publish sends.
+  setHttpTransport((input, init) => net.fetch(input, init as RequestInit));
   lastUsage = loadCachedUsage();
   if (settings.load().showTray) createTray(); initAutoUpdater(); startPairing();
   if (supportsWidget() && settings.load().showWidget) {

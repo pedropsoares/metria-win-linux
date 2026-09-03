@@ -1,3 +1,4 @@
+import { httpFetch } from "./http-transport";
 import { encryptionKeyFromSecret, topicFromSecret } from "./pairing-secret";
 import { buildSnapshot, sealSnapshot } from "./snapshot";
 import type { ProviderUsage } from "../shared/types";
@@ -30,7 +31,7 @@ export class NtfyPublisher {
     this.inFlight?.abort();
     const controller = new AbortController();
     this.inFlight = controller;
-    void fetch(topicURL, {
+    void httpFetch(topicURL, {
       method: "POST",
       body: sealSnapshot(payload, encryptionKeyFromSecret(secret)),
       headers: { "Content-Type": "text/plain", Priority: "low" },
