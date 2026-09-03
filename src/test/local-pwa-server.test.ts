@@ -66,9 +66,9 @@ test("serves nothing but the PWA's own files", async () => {
 test("hands out the snapshot only to a client holding a pairing token", async () => {
   await withServer(async (port, server) => {
     server.updateSnapshot(Buffer.from(JSON.stringify({ updatedAt: "2026-09-02T15:00:00Z", providers: [] })));
-    assert.equal((await get(port, "/snapshot")).status, 204, "no token");
-    assert.equal((await get(port, "/snapshot", "wrong-token")).status, 204, "wrong token");
-    assert.equal((await get(port, "/snapshot", "")).status, 204, "empty token is never valid");
+    assert.equal((await get(port, "/snapshot")).status, 401, "no token");
+    assert.equal((await get(port, "/snapshot", "wrong-token")).status, 401, "wrong token");
+    assert.equal((await get(port, "/snapshot", "")).status, 401, "empty token is never valid");
 
     for (const token of [LEGACY_TOKEN, LOCAL_TOKEN]) {
       const response = await get(port, "/snapshot", token);

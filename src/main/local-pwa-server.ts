@@ -1,5 +1,6 @@
 import { createServer, type Server } from "node:http";
 import { readFileSync } from "node:fs";
+import Bonjour from "bonjour-service";
 import { primaryIPv4Address } from "./local-network";
 
 /**
@@ -25,6 +26,8 @@ export class LocalPWAServer {
   private snapshot: Buffer | undefined;
   private snapshotTokens = new Set<string>();
   private activePort: number | undefined;
+  private bonjour: Bonjour | undefined;
+  private publishedService: { stop: CallableFunction } | undefined;
   onURLChange: (() => void) | undefined;
 
   get port(): number | undefined { return this.activePort; }
@@ -44,6 +47,24 @@ export class LocalPWAServer {
     this.server?.close();
     this.server = undefined;
     this.activePort = undefined;
+    this.unpublish();
+  }
+
+  /** Advertises `_metria._tcp`, matching the macOS host (`LocalPWAServer.swift`), so a
+   * DHCP change on this host self-heals the same way: the phone re-resolves the address
+   * over Bonjour instead of the pinned address going dead until the QR code is re-scanned. */
+  private publish(): void {
+    this.unpublish();
+    if (!this.activePort) return;
+    this.bonjour ??= new Bonjour();
+    this.publishedService = this.bonjour.publish({ name: "Metria", type: "metria", port: this.activePort });
+  }
+
+  private unpublish(): void {
+    this.publishedService?.stop();
+    this.publishedService = undefined;
+    this.bonjour?.destroy();
+    this.bonjour = undefined;
   }
 
   updateSnapshot(snapshot: Buffer): void { this.snapshot = snapshot; }
@@ -67,6 +88,7 @@ export class LocalPWAServer {
     server.listen(port, () => {
       const address = server.address();
       this.activePort = typeof address === "object" && address ? address.port : port;
+      this.publish();
       this.onURLChange?.();
     });
     this.server = server;
@@ -82,7 +104,11 @@ export class LocalPWAServer {
     const path = (url ?? "/").split("?")[0] ?? "/";
     if (path === "/snapshot") {
       const presented = Array.isArray(token) ? token[0] : token;
-      if (!presented || !this.snapshotTokens.has(presented) || !this.snapshot) { send(204, Buffer.alloc(0)); return; }
+      // Distinct from a missing snapshot: a phone paired against a token that no longer
+      // validates (the pairing was regenerated) needs to be told its pairing was
+      // rejected, not left to read the same as a Mac that hasn't published yet.
+      if (!presented || !this.snapshotTokens.has(presented)) { send(401, Buffer.alloc(0)); return; }
+      if (!this.snapshot) { send(204, Buffer.alloc(0)); return; }
       send(200, this.snapshot, "application/json; charset=utf-8");
       return;
     }
