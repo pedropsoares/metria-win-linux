@@ -89,6 +89,9 @@ export interface MetriaApi {
   onOpenSettings(callback: () => void): void;
   onCardShow(callback: (payload: CardShowPayload) => void): void;
   onCardHide(callback: () => void): void;
+  onWidgetReveal(callback: () => void): void;
+  onWidgetCollapse(callback: () => void): void;
+  setWidgetHoverState(hovered: boolean): Promise<void>;
   setProviderEnabled(kind: ProviderKind, enabled: boolean): Promise<AppSettings>;
   reconnect(kind: ProviderKind): Promise<{ command: string; message: string }>;
   setWidgetYOffset(offsetY: number): Promise<AppSettings>;
@@ -212,6 +215,33 @@ export function statusDotColor(hasError: boolean): string {
 }
 
 export const WIDGET_ITEM_HEIGHT = 52;
+/** Thickness of the auto-hide widget window once it collapses to the peek pill hugging
+ * the screen edge. Sized to still fit the reveal chevron, mirroring the macOS notch's
+ * 18pt `hiddenWidth`. */
+export const WIDGET_COLLAPSED_THICKNESS = 14;
+/** Length of the peek pill along the edge. The collapsed window is only this long,
+ * centred on the rail, rather than running the rail's whole extent. */
+export const WIDGET_PEEK_EXTENT = 80;
+/** How far the cursor hot zone grows past the peek, on every side but the screen edge,
+ * so the reveal target isn't pixel-perfect. */
+export const WIDGET_HOT_ZONE_GRAB = 6;
+/** Debounce before the widget collapses again once the cursor leaves it. Matches the
+ * macOS notch's 0.25s hover-collapse delay. */
+export const WIDGET_COLLAPSE_DELAY_MS = 250;
+/** Dwell time before a cursor resting in the hot zone reveals the widget, so merely
+ * sweeping past the screen edge doesn't pop it open. */
+export const WIDGET_REVEAL_DWELL_MS = 100;
+/** How far the revealed widget and its card are grown when deciding whether the cursor
+ * is still "on" them. Must be at least the widget-to-card spacing, or crossing that gap
+ * would read as leaving and collapse the widget mid-interaction. */
+export const WIDGET_KEEP_OPEN_MARGIN = 12;
+/** Poll interval for the cursor-position fallback that detects the hot zone even when
+ * the window manager fails to deliver DOM hover events. */
+export const WIDGET_CURSOR_POLL_MS = 100;
+/** Duration of the reveal/collapse slide. The renderer animates the surface with a CSS
+ * transform for exactly this long; the main process only resizes the window once, after
+ * the slide-out has finished. */
+export const WIDGET_SLIDE_MS = 160;
 export const CARD_WIDTH = 316;
 export const DEFAULT_WIDGET_Y_OFFSET = 12;
 export const DEFAULT_REFRESH_INTERVAL_SECONDS = 300;

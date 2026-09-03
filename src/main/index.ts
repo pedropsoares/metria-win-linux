@@ -2,13 +2,15 @@ import { app, BrowserWindow, clipboard, ipcMain, Menu, nativeImage, screen, shel
 import { autoUpdater } from "electron-updater";
 import { dirname, join } from "node:path";
 import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
-import { ALL_PROVIDER_KINDS, CARD_WIDTH, isProviderKind, isSpendDisplay, PROVIDER_LOGOS, providerShortLabel, WIDGET_ITEM_HEIGHT } from "../shared/types";
+import { ALL_PROVIDER_KINDS, CARD_WIDTH, isProviderKind, isSpendDisplay, PROVIDER_LOGOS, providerShortLabel, WIDGET_COLLAPSE_DELAY_MS, WIDGET_COLLAPSED_THICKNESS, WIDGET_CURSOR_POLL_MS, WIDGET_HOT_ZONE_GRAB, WIDGET_ITEM_HEIGHT, WIDGET_KEEP_OPEN_MARGIN, WIDGET_PEEK_EXTENT, WIDGET_REVEAL_DWELL_MS, WIDGET_SLIDE_MS } from "../shared/types";
 import { LocalPWAServer } from "./local-pwa-server";
 import { NtfyPublisher } from "./ntfy";
 import { PairingStore } from "./pairing";
 import { ProviderService } from "./providers";
 import { findResource } from "./resources";
 import { SettingsStore } from "./settings";
+import { autoHideHotZone, collapsedWidgetBounds, inflateRect, pointInAnyRect } from "./widget-geometry";
+import type { Rect } from "./widget-geometry";
 import type { AppSettings, PairingInfo, ProviderKind, ProviderSourceChoice, ProviderUsage } from "../shared/types";
 
 let window: BrowserWindow | undefined;
@@ -16,6 +18,25 @@ let widgetWindow: BrowserWindow | undefined;
 let cardWindow: BrowserWindow | undefined;
 let cardActiveIndex: number | null = null;
 let pendingCardHide: NodeJS.Timeout | undefined;
+// Auto-hide state machine (mirrors the card's showCard/hideCard/scheduleCardHide
+// above): the widget window itself shrinks to a peek pill hugging the screen edge
+// instead of the widget going click-through, since setIgnoreMouseEvents({forward})
+// is unsupported on Linux and would leave the peek unreachable there.
+//
+// The slide itself is a CSS transform in the renderer, and the window is resized
+// exactly once per transition. Stepping the window bounds frame by frame (as this
+// first did) means a real OS resize of a transparent always-on-top window every
+// 16ms, which stutters under DWM and most Linux compositors; the macOS notch never
+// resizes its panel at all and animates only its content.
+let widgetRevealed = true;
+let pendingWidgetCollapse: NodeJS.Timeout | undefined;
+let pendingWidgetReveal: NodeJS.Timeout | undefined;
+// Set while the renderer plays the slide-out and the window is still expanded.
+let pendingWidgetShrink: NodeJS.Timeout | undefined;
+let cursorPollTimer: NodeJS.Timeout | undefined;
+let cachedExpandedBounds: Rect | undefined;
+let cachedCollapsedBounds: Rect | undefined;
+let cachedHotZoneBounds: Rect | undefined;
 let tray: Tray | undefined;
 let refreshTimer: NodeJS.Timeout | undefined;
 let isQuitting = false;
@@ -103,20 +124,155 @@ function createWidgetWindow(): BrowserWindow {
     webPreferences: { preload: join(__dirname, "../preload/index.js"), contextIsolation: true, sandbox: true, nodeIntegration: false }
   });
   widget.loadFile(join(__dirname, "../renderer/widget.html"));
+  // Tell the renderer which state it was born in, so an auto-hide widget doesn't
+  // paint the full rail for a frame before the first settings query resolves.
+  widget.webContents.once("did-finish-load", () => { widget.webContents.send(widgetRevealed ? "metria:widget-reveal" : "metria:widget-collapse"); });
   // Same re-assert on mapping as the card: compositors may override pre-show bounds.
   widget.on("show", () => { widget.setAlwaysOnTop(true, "floating"); widget.moveTop(); updateWidgetBounds(lastUsage); });
   widget.on("blur", () => { widget.setAlwaysOnTop(true, "floating"); widget.moveTop(); });
-  widget.on("closed", () => { widgetWindow = undefined; hideCard(); });
+  widget.on("closed", () => { widgetWindow = undefined; hideCard(); resetWidgetAutoHide(); });
   widget.setAlwaysOnTop(true, "floating");
   widget.setHasShadow(false);
   return widget;
 }
+function autoHideEnabled(): boolean { return settings.load().widgetBehavior === "auto-hide"; }
+
+/** Clears every auto-hide timer. Must run before the widget window is destroyed:
+ * a pending shrink or reveal would otherwise fire against the replacement window
+ * with the geometry of the one it replaced. */
+function resetWidgetAutoHide(): void {
+  stopCursorPoll();
+  cancelWidgetCollapse();
+  cancelWidgetReveal();
+  clearTimeout(pendingWidgetShrink);
+  pendingWidgetShrink = undefined;
+}
+
+/** Applies the current widgetBehavior to a freshly (re)created widget window: starts
+ * it collapsed with the cursor poll running, or revealed with the poll stopped. */
+function setWidgetAutoHideState(): void {
+  if (autoHideEnabled()) {
+    widgetRevealed = false;
+    if (process.platform === "win32") widgetWindow?.setIgnoreMouseEvents(true, { forward: true });
+    startCursorPoll();
+  } else {
+    widgetRevealed = true;
+    if (process.platform === "win32") widgetWindow?.setIgnoreMouseEvents(false);
+    stopCursorPoll();
+  }
+}
+
 function updateWidgetBounds(values: typeof lastUsage): void {
   if (!widgetWindow) return;
-  const enabled = settings.load().enabledProviders;
+  const current = settings.load();
+  const enabled = current.enabledProviders;
   const count = values.filter((provider) => enabled.includes(provider.kind)).length;
-    widgetWindow.setBounds(widgetBounds(displayArea(), count));
+  const expanded = widgetBounds(displayArea(), count);
+  cachedExpandedBounds = expanded;
+  if (current.widgetBehavior === "auto-hide") {
+    const collapsed = collapsedWidgetBounds(expanded, current.widgetPosition, WIDGET_COLLAPSED_THICKNESS, WIDGET_PEEK_EXTENT);
+    cachedCollapsedBounds = collapsed;
+    cachedHotZoneBounds = autoHideHotZone(collapsed, current.widgetPosition, WIDGET_HOT_ZONE_GRAB);
+    // A refresh landing mid-slide-out must not cut the animation short by shrinking
+    // the window early; `pendingWidgetShrink` still owns the final resize.
+    widgetWindow.setBounds(widgetRevealed || pendingWidgetShrink ? expanded : collapsed);
+  } else {
+    cachedCollapsedBounds = undefined;
+    cachedHotZoneBounds = undefined;
+    widgetWindow.setBounds(expanded);
+  }
   if (cardActiveIndex !== null) positionCard(cardActiveIndex);
+}
+
+/** Grows the window to its full rect in one go and lets the renderer slide the surface
+ * in from the edge. The window is always expanded before any content is visible, so it
+ * never needs to be click-through while revealed. */
+function revealWidget(): void {
+  if (!widgetWindow || !cachedExpandedBounds || widgetRevealed) return;
+  widgetRevealed = true;
+  clearTimeout(pendingWidgetShrink);
+  pendingWidgetShrink = undefined;
+  if (process.platform === "win32") widgetWindow.setIgnoreMouseEvents(false);
+  widgetWindow.setBounds(cachedExpandedBounds);
+  widgetWindow.webContents.send("metria:widget-reveal");
+}
+
+/** Plays the slide-out inside the still-expanded window, then shrinks to the peek once
+ * the renderer has finished animating. Shrinking first would clip the animation. */
+function collapseWidget(): void {
+  if (!widgetWindow || !cachedCollapsedBounds || !widgetRevealed) return;
+  widgetRevealed = false;
+  hideCard();
+  widgetWindow.webContents.send("metria:widget-collapse");
+  clearTimeout(pendingWidgetShrink);
+  pendingWidgetShrink = setTimeout(() => {
+    pendingWidgetShrink = undefined;
+    if (!widgetWindow || widgetRevealed || !cachedCollapsedBounds) return;
+    if (process.platform === "win32") widgetWindow.setIgnoreMouseEvents(true, { forward: true });
+    widgetWindow.setBounds(cachedCollapsedBounds);
+  }, WIDGET_SLIDE_MS);
+}
+
+function scheduleWidgetCollapse(): void {
+  clearTimeout(pendingWidgetCollapse);
+  pendingWidgetCollapse = setTimeout(() => { pendingWidgetCollapse = undefined; collapseWidget(); }, WIDGET_COLLAPSE_DELAY_MS);
+}
+
+function cancelWidgetCollapse(): void {
+  if (!pendingWidgetCollapse) return;
+  clearTimeout(pendingWidgetCollapse);
+  pendingWidgetCollapse = undefined;
+}
+
+function scheduleWidgetReveal(): void {
+  if (widgetRevealed || pendingWidgetReveal) return;
+  pendingWidgetReveal = setTimeout(() => { pendingWidgetReveal = undefined; revealWidget(); }, WIDGET_REVEAL_DWELL_MS);
+}
+
+function cancelWidgetReveal(): void {
+  if (!pendingWidgetReveal) return;
+  clearTimeout(pendingWidgetReveal);
+  pendingWidgetReveal = undefined;
+}
+
+/** The single decision point for both triggers (cursor poll and DOM hover). */
+function setWidgetPointerInside(inside: boolean): void {
+  if (inside) { cancelWidgetCollapse(); scheduleWidgetReveal(); return; }
+  cancelWidgetReveal();
+  if (widgetRevealed && !pendingWidgetCollapse) scheduleWidgetCollapse();
+}
+
+/** Everything that counts as "the cursor is still on the widget". While revealed the
+ * whole widget qualifies, not just the peek's hot zone — testing only the hot zone
+ * collapsed the widget out from under a cursor resting on a provider. The widget and
+ * card are both inflated so the CARD_SPACING gap between them is bridged, mirroring
+ * the macOS notch's `interactionMargin`. */
+function widgetKeepOpenRects(): (Rect | undefined)[] {
+  const card = cardWindow?.isVisible() ? cardWindow.getBounds() : undefined;
+  const expandedActive = widgetRevealed || pendingWidgetShrink !== undefined;
+  return [
+    cachedHotZoneBounds,
+    expandedActive && cachedExpandedBounds ? inflateRect(cachedExpandedBounds, WIDGET_KEEP_OPEN_MARGIN) : undefined,
+    card ? inflateRect(card, WIDGET_KEEP_OPEN_MARGIN) : undefined
+  ];
+}
+
+/** Cursor position, not just DOM hover, decides the reveal: a transparent
+ * always-on-top window can miss `mouseenter`/`mouseleave` under some window
+ * managers, which is what caused the collapsed rail to get stuck hidden and
+ * forced a revert (commit 941b788). The two triggers are intentionally
+ * redundant. */
+function startCursorPoll(): void {
+  if (cursorPollTimer) return;
+  cursorPollTimer = setInterval(() => {
+    if (!widgetWindow) return;
+    setWidgetPointerInside(pointInAnyRect(screen.getCursorScreenPoint(), widgetKeepOpenRects()));
+  }, WIDGET_CURSOR_POLL_MS);
+}
+function stopCursorPoll(): void {
+  if (!cursorPollTimer) return;
+  clearInterval(cursorPollTimer);
+  cursorPollTimer = undefined;
 }
 
 /** Hover card shown to the left of the widget while pointing at a provider. */
@@ -278,13 +434,16 @@ function broadcastSettings(): void {
 
 function recreateWidget(): void {
   if (!settings.load().showWidget) {
+    resetWidgetAutoHide();
     widgetWindow?.destroy();
     widgetWindow = undefined;
     hideCard();
     return;
   }
+  resetWidgetAutoHide();
   widgetWindow?.destroy();
   widgetWindow = createWidgetWindow();
+  setWidgetAutoHideState();
   updateWidgetBounds(lastUsage);
   widgetWindow.showInactive();
 }
@@ -310,6 +469,7 @@ function showWidgetMenu(): void {
 
 function quitApp(): void {
   isQuitting = true;
+  resetWidgetAutoHide();
   window?.destroy();
   widgetWindow?.destroy();
   cardWindow?.destroy();
@@ -480,7 +640,8 @@ if (hasSingleInstanceLock) app.whenReady().then(() => {
   if (settings.load().showTray) createTray(); initAutoUpdater(); startPairing();
   if (supportsWidget() && settings.load().showWidget) {
     widgetWindow = createWidgetWindow();
-    widgetWindow.setBounds(widgetBounds(displayArea(), 0));
+    setWidgetAutoHideState();
+    updateWidgetBounds(lastUsage);
     widgetWindow.showInactive();
   }
   void usage();
@@ -492,6 +653,11 @@ if (hasSingleInstanceLock) app.whenReady().then(() => {
     if (index === null) { scheduleCardHide(); return; }
     if (typeof index !== "number" || !Number.isInteger(index) || index < 0 || index >= visibleProviders().length) throw new Error("Invalid provider index.");
     showCard(index);
+  });
+  ipcMain.handle("metria:widget-hover-state", (event, hovered: unknown) => {
+    requireTrustedSender(event);
+    if (typeof hovered !== "boolean") throw new Error("Invalid widget hover state.");
+    setWidgetPointerInside(hovered);
   });
   ipcMain.handle("metria:card-resize", (event, height: unknown) => {
     requireTrustedSender(event);
@@ -525,9 +691,12 @@ if (hasSingleInstanceLock) app.whenReady().then(() => {
     // from the clamped frame), so drags always restart from a valid position
     // and never accumulate an offset outside the work area.
     const area = displayArea();
-    const height = widgetWindow?.getBounds().height ?? 120;
+    // Use the cached expanded rect, not the live window bounds: while collapsed,
+    // the window is only WIDGET_COLLAPSED_THICKNESS thick, and clamping against
+    // that would pin a drag right after reveal to a sliver of the edge.
+    const height = cachedExpandedBounds?.height ?? widgetWindow?.getBounds().height ?? 120;
     const vertical = settings.load().widgetPosition === "left" || settings.load().widgetPosition === "right";
-    const extent = vertical ? height : (widgetWindow?.getBounds().width ?? 120);
+    const extent = vertical ? height : (cachedExpandedBounds?.width ?? widgetWindow?.getBounds().width ?? 120);
     const limit = vertical ? area.height - extent : area.width - extent;
     const clamped = Math.max(0, Math.min(Math.round(offsetY), Math.max(0, limit)));
     const next = settings.setWidgetYOffset(clamped);
